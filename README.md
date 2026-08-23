@@ -10,13 +10,13 @@ The project is intentionally small. Its primary purpose is to validate platform 
 
 ## Release 1 endpoints
 
-\`\`\`text
+```text
 GET /health
 GET /seasons/{year}/races
 GET /seasons/{year}/standings/drivers
 GET /seasons/{year}/standings/constructors
 GET /seasons/{year}/races/{round}/results
-\`\`\`
+```
 
 ## Responsibilities
 
@@ -32,13 +32,32 @@ GET /seasons/{year}/races/{round}/results
 - Applying resources to a Kubernetes cluster.
 - Storing deployment configuration or secrets.
 
-Those responsibilities belong to \`platform-infrastructure\` and \`platform-gitops\`.
+Those responsibilities belong to `platform-infrastructure` and `platform-gitops`.
 
 ## Local development
 
-> Commands and language runtime will be added when implementation starts in Sprint 1.
+The Sprint 1 vertical slice runs without AWS or Kubernetes. It starts a local
+PostgreSQL database, imports one historical season from Jolpica, and serves the
+documented read endpoints.
 
-The local setup must eventually start PostgreSQL, run one idempotent import, start the API, and execute tests without depending on AWS.
+```powershell
+docker compose up -d postgres
+Copy-Item .env.example .env
+python -m pip install -e ".[dev]"
+python -m app.cli 2024
+uvicorn app.main:app --reload
+```
+
+The API is then available at `http://localhost:8000`; interactive endpoint
+documentation is at `/docs`. Re-running `python -m app.cli 2024` is safe: the
+importer updates existing rows rather than creating duplicates.
+
+Run the first automated check with:
+
+```powershell
+pytest
+ruff check .
+```
 
 ## Quality gates
 
@@ -52,15 +71,15 @@ Every pull request must, at minimum:
 
 ## Delivery
 
-GitHub Actions builds and tests the image. It does not deploy directly to Kubernetes. A reviewed image-version update in \`platform-gitops\` is reconciled into the cluster by Argo CD.
+GitHub Actions builds and tests the image. It does not deploy directly to Kubernetes. A reviewed image-version update in `platform-gitops` is reconciled into the cluster by Argo CD.
 
 ## Documentation
 
-Platform decisions, SLOs, runbooks, and postmortems live in the \`formula-docs\` repository. See in particular ADR-002 (data source) and ADR-003 (GitOps delivery).
+Platform decisions, SLOs, runbooks, and postmortems live in the `formula-docs` repository. See in particular ADR-002 (data source) and ADR-003 (GitOps delivery).
 
 ## Security
 
-- Never commit credentials or local \`.env\` files.
+- Never commit credentials or local `.env` files.
 - Read credentials only from environment variables or the runtime secret mechanism.
 - Use least-privilege database credentials.
 - Treat all upstream data as untrusted input.
