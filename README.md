@@ -10,13 +10,13 @@ The project is intentionally small. Its primary purpose is to validate platform 
 
 ## Release 1 endpoints
 
-```text
+\`\`\`text
 GET /health
 GET /seasons/{year}/races
 GET /seasons/{year}/standings/drivers
 GET /seasons/{year}/standings/constructors
 GET /seasons/{year}/races/{round}/results
-```
+\`\`\`
 
 ## Responsibilities
 
@@ -32,7 +32,7 @@ GET /seasons/{year}/races/{round}/results
 - Applying resources to a Kubernetes cluster.
 - Storing deployment configuration or secrets.
 
-Those responsibilities belong to `platform-infrastructure` and `platform-gitops`.
+Those responsibilities belong to \`platform-infrastructure\` and \`platform-gitops\`.
 
 ## Local development
 
@@ -42,7 +42,7 @@ The local setup must eventually start PostgreSQL, run one idempotent import, sta
 
 ## Quality gates
 
-Every merge request must, at minimum:
+Every pull request must, at minimum:
 
 - run unit tests;
 - run an end-to-end import test against a disposable database;
@@ -52,15 +52,15 @@ Every merge request must, at minimum:
 
 ## Delivery
 
-GitLab CI builds and tests the image. It does not deploy directly to Kubernetes. A reviewed image-version update in `platform-gitops` is reconciled into the cluster by Argo CD.
+GitHub Actions builds and tests the image. It does not deploy directly to Kubernetes. A reviewed image-version update in \`platform-gitops\` is reconciled into the cluster by Argo CD.
 
 ## Documentation
 
-Platform decisions, SLOs, runbooks, and postmortems live in the `platform-docs` repository. See in particular ADR-002 (data source) and ADR-003 (GitOps delivery).
+Platform decisions, SLOs, runbooks, and postmortems live in the \`formula-docs\` repository. See in particular ADR-002 (data source) and ADR-003 (GitOps delivery).
 
 ## Security
 
-- Never commit credentials or local `.env` files.
+- Never commit credentials or local \`.env\` files.
 - Read credentials only from environment variables or the runtime secret mechanism.
 - Use least-privilege database credentials.
 - Treat all upstream data as untrusted input.
