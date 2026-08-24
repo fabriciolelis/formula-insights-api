@@ -1,0 +1,1 @@
+"""Formula Insights API application."""
