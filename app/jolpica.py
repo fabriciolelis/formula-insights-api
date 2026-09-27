@@ -34,6 +34,8 @@ class JolpicaClient:
                 expected_total = page_total
             elif page_total != expected_total:
                 raise UpstreamDataError("Jolpica result total changed during pagination")
+            if expected_total == 0:
+                return []
 
             races = metadata["RaceTable"]["Races"]
             page_results = sum(len(race["Results"]) for race in races)
@@ -43,9 +45,11 @@ class JolpicaClient:
                 )
 
             for race in races:
+                race_without_results = {
+                    key: deepcopy(value) for key, value in race.items() if key != "Results"
+                }
                 stored_race = races_by_round.setdefault(
-                    race["round"],
-                    {key: deepcopy(value) for key, value in race.items() if key != "Results"} | {"Results": []},
+                    race["round"], {**race_without_results, "Results": []}
                 )
                 stored_race["Results"].extend(deepcopy(race["Results"]))
 
@@ -75,6 +79,8 @@ class JolpicaClient:
                 expected_total = page_total
             elif page_total != expected_total:
                 raise UpstreamDataError("Jolpica race total changed during pagination")
+            if expected_total == 0:
+                return []
 
             page_races = metadata["RaceTable"]["Races"]
             if not page_races:
