@@ -65,11 +65,13 @@ uv run ruff check .
 
 Tests use recorded Jolpica responses in `tests/fixtures/jolpica`, so they run
 offline. The PostgreSQL end-to-end test runs only when `TEST_DATABASE_URL` is
-set; it works in a throwaway schema and drops it afterwards, so it is safe to
-point at the local Compose database:
+set (in CI it always runs, and fails if the URL is missing). It works in a
+throwaway schema that it drops afterwards. Use a separate test database so an
+interrupted run never leaves anything in your development data:
 
 ```powershell
-$env:TEST_DATABASE_URL = "postgresql+psycopg://formula_insights:formula_insights@localhost:5432/formula_insights"
+docker compose exec postgres createdb -U formula_insights formula_insights_test
+$env:TEST_DATABASE_URL = "postgresql+psycopg://formula_insights:formula_insights@localhost:5432/formula_insights_test"
 uv run pytest
 ```
 
