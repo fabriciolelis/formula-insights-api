@@ -63,6 +63,18 @@ uv run pytest
 uv run ruff check .
 ```
 
+Static analysis uses [Semgrep](https://semgrep.dev/) with the `p/python` and
+`p/secrets` rulesets; CI fails on ERROR-severity findings. To run it locally,
+install it with `uv tool install semgrep`, then:
+
+```powershell
+semgrep scan --config p/python --config p/secrets --metrics off
+```
+
+The committed `.mcp.json` registers Semgrep's MCP server (`semgrep mcp`) for
+AI coding assistants such as Claude Code; it requires the `semgrep` command on
+your `PATH`.
+
 ## Quality gates
 
 Every pull request must, at minimum:
