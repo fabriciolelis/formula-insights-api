@@ -43,8 +43,12 @@ def test_2024_season_import_is_complete_and_idempotent_on_postgres(postgres_engi
 
     with database.SessionLocal() as session:
         importer = Importer(session, FixtureJolpicaClient())
-        assert importer.import_season(2024) == {"races": 24, "results": 479}
-        assert importer.import_season(2024) == {"races": 0, "results": 0}
+        assert importer.import_season(2024) == {
+            "races": 24, "results": 479, "driver_standings": 24, "constructor_standings": 10
+        }
+        assert importer.import_season(2024) == {
+            "races": 0, "results": 0, "driver_standings": 0, "constructor_standings": 0
+        }
         assert session.scalar(select(func.count()).select_from(Race)) == 24
         assert session.scalar(select(func.count()).select_from(RaceResult)) == 479
 
@@ -55,3 +59,7 @@ def test_2024_season_import_is_complete_and_idempotent_on_postgres(postgres_engi
         results = client.get("/seasons/2024/races/1/results").json()
         assert len(results) == 20
         assert results[0]["driver"]["id"] == "max_verstappen"
+        drivers = client.get("/seasons/2024/standings/drivers").json()
+        assert (drivers[0]["id"], drivers[0]["points"]) == ("max_verstappen", 437)
+        constructors = client.get("/seasons/2024/standings/constructors").json()
+        assert (constructors[0]["id"], constructors[0]["points"]) == ("mclaren", 666)

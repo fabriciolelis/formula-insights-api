@@ -1,11 +1,18 @@
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, create_schema
-from app.models import Constructor, Driver, Race, RaceResult
+from app.models import (
+    Constructor,
+    ConstructorStanding,
+    Driver,
+    DriverStanding,
+    Race,
+    RaceResult,
+)
 
 
 @asynccontextmanager
@@ -44,28 +51,47 @@ def season_races(year: int, session: Session = Depends(session_dependency)):
 
 @app.get("/seasons/{year}/standings/drivers")
 def driver_standings(year: int, session: Session = Depends(session_dependency)):
-    statement = (
-        select(Driver.id, Driver.given_name, Driver.family_name, func.sum(RaceResult.points).label("points"))
-        .join(RaceResult, RaceResult.driver_id == Driver.id)
-        .join(Race, Race.id == RaceResult.race_id)
-        .where(Race.season == year)
-        .group_by(Driver.id, Driver.given_name, Driver.family_name)
-        .order_by(func.sum(RaceResult.points).desc())
-    )
-    return [dict(row._mapping) for row in session.execute(statement)]
+    """Official driver standings, including sprint points and penalties, as published upstream."""
+    rows = session.execute(
+        select(DriverStanding, Driver)
+        .join(Driver)
+        .where(DriverStanding.season == year)
+        .order_by(DriverStanding.position.is_(None), DriverStanding.position)
+    ).all()
+    return [
+        {
+            "position": standing.position,
+            "position_text": standing.position_text,
+            "id": driver.id,
+            "given_name": driver.given_name,
+            "family_name": driver.family_name,
+            "points": standing.points,
+            "wins": standing.wins,
+        }
+        for standing, driver in rows
+    ]
 
 
 @app.get("/seasons/{year}/standings/constructors")
 def constructor_standings(year: int, session: Session = Depends(session_dependency)):
-    statement = (
-        select(Constructor.id, Constructor.name, func.sum(RaceResult.points).label("points"))
-        .join(RaceResult, RaceResult.constructor_id == Constructor.id)
-        .join(Race, Race.id == RaceResult.race_id)
-        .where(Race.season == year)
-        .group_by(Constructor.id, Constructor.name)
-        .order_by(func.sum(RaceResult.points).desc())
-    )
-    return [dict(row._mapping) for row in session.execute(statement)]
+    """Official constructor standings, including sprint points and penalties, as published upstream."""
+    rows = session.execute(
+        select(ConstructorStanding, Constructor)
+        .join(Constructor)
+        .where(ConstructorStanding.season == year)
+        .order_by(ConstructorStanding.position.is_(None), ConstructorStanding.position)
+    ).all()
+    return [
+        {
+            "position": standing.position,
+            "position_text": standing.position_text,
+            "id": constructor.id,
+            "name": constructor.name,
+            "points": standing.points,
+            "wins": standing.wins,
+        }
+        for standing, constructor in rows
+    ]
 
 
 @app.get("/seasons/{year}/races/{round_number}/results")

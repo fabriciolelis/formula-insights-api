@@ -12,7 +12,11 @@ def main() -> None:
     create_schema()
     with SessionLocal() as session:
         counts = Importer(session, JolpicaClient()).import_season(args.season)
-    print(f"Imported season {args.season}: {counts['races']} new races, {counts['results']} new results")
+    print(
+        f"Imported season {args.season}: {counts['races']} new races, "
+        f"{counts['results']} new results, {counts['driver_standings']} new driver standings, "
+        f"{counts['constructor_standings']} new constructor standings"
+    )
 
 
 if __name__ == "__main__":

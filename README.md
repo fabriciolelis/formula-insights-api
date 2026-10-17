@@ -18,6 +18,11 @@ GET /seasons/{year}/standings/constructors
 GET /seasons/{year}/races/{round}/results
 ```
 
+Standings mirror the official championship tables published by Jolpica after
+the latest imported round, so they include sprint points, penalties, and
+exclusions. Excluded entries have no numeric `position` (for example,
+`position_text` is `E`) and are listed last.
+
 ## Responsibilities
 
 - Validate and serve HTTP requests.
