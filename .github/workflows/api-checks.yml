@@ -13,6 +13,22 @@ jobs:
   test:
     name: Test and lint
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: formula_insights_test
+          POSTGRES_USER: formula_insights
+          POSTGRES_PASSWORD: formula_insights
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U formula_insights -d formula_insights_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://formula_insights:formula_insights@localhost:5432/formula_insights_test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

@@ -63,6 +63,20 @@ uv run pytest
 uv run ruff check .
 ```
 
+Tests use recorded Jolpica responses in `tests/fixtures/jolpica`, so they run
+offline. The PostgreSQL end-to-end test runs only when `TEST_DATABASE_URL` is
+set (in CI it always runs, and fails if the URL is missing). It works in a
+throwaway schema that it drops afterwards. Use a separate test database so an
+interrupted run never leaves anything in your development data:
+
+```powershell
+docker compose exec postgres createdb -U formula_insights formula_insights_test
+$env:TEST_DATABASE_URL = "postgresql+psycopg://formula_insights:formula_insights@localhost:5432/formula_insights_test"
+uv run pytest
+```
+
+To re-record the fixtures, run `uv run python -m tests.fixtures.jolpica.record 2024`.
+
 Static analysis uses [Semgrep](https://semgrep.dev/) with the `p/python` and
 `p/secrets` rulesets; CI fails on ERROR-severity findings. To run it locally,
 install it with `uv tool install semgrep`, then:
@@ -80,7 +94,7 @@ your `PATH`.
 Every pull request must, at minimum:
 
 - run unit tests;
-- run an end-to-end import test against a disposable database (planned);
+- run an end-to-end import test against a disposable PostgreSQL database;
 - build the container image;
 - check formatting and static analysis;
 - scan dependencies and container image vulnerabilities.
