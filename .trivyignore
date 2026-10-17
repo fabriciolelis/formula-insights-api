@@ -1,0 +1,22 @@
+# Accepted base-image vulnerabilities (python:3.12-slim, Debian 13).
+# Accepted 2026-10-17: HIGH severity, no fixed Debian package available, and
+# the affected tools are not used by the API process at runtime.
+# Each entry expires on 2027-01-15; review it then or when a fix ships.
+
+# util-linux: mount, login, nsenter and related libraries
+CVE-2026-76642 exp:2027-01-15
+CVE-2026-78408 exp:2027-01-15
+CVE-2026-78409 exp:2027-01-15
+CVE-2026-78410 exp:2027-01-15
+
+# acl: libacl1
+CVE-2026-54369 exp:2027-01-15
+
+# ncurses: libncursesw6, libtinfo6, ncurses-base, ncurses-bin
+CVE-2025-69720 exp:2027-01-15
+
+# systemd: systemd-homed (libsystemd0, libudev1)
+CVE-2026-16742 exp:2027-01-15
+
+# perl-base: Archive::Tar (Debian status: fix deferred)
+CVE-2026-9538 exp:2027-01-15
