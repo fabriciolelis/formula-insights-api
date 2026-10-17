@@ -1,21 +1,12 @@
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.pool import StaticPool
 
 from app import database
 from app.importer import Importer
 from app.main import app
-from app.models import Base
 from tests.test_importer import FakeJolpica
 
 
-def test_imported_data_is_served_from_api(monkeypatch):
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
-    database.engine = engine
-    database.SessionLocal.configure(bind=engine)
-    Base.metadata.create_all(engine)
+def test_imported_data_is_served_from_api(sqlite_engine):
     with database.SessionLocal() as session:
         Importer(session, FakeJolpica()).import_season(2024)
 
