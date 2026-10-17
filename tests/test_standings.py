@@ -1,26 +1,17 @@
+import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy import func, select
 
 from app import database
-from app.importer import Importer
+from app.importer import Importer, StandingsNotUpdatedError
+from app.jolpica import UpstreamDataError
 from app.main import app
-from app.models import Base
+from app.models import ConstructorStanding, DriverStanding, RaceResult
 from tests.fixtures.jolpica.client import FixtureJolpicaClient
 from tests.test_importer import FakeJolpica
 
 
-def use_sqlite_engine():
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
-    database.engine = engine
-    database.SessionLocal.configure(bind=engine)
-    Base.metadata.create_all(engine)
-
-
-def test_2024_standings_match_the_official_championship_including_sprints():
-    use_sqlite_engine()
+def test_2024_standings_match_the_official_championship_including_sprints(sqlite_engine):
     with database.SessionLocal() as session:
         counts = Importer(session, FixtureJolpicaClient()).import_season(2024)
     assert counts["driver_standings"] == 24
@@ -56,8 +47,7 @@ class ExcludedConstructorJolpica(FakeJolpica):
         }
 
 
-def test_excluded_constructors_have_no_position_and_are_listed_last():
-    use_sqlite_engine()
+def test_excluded_constructors_have_no_position_and_are_listed_last(sqlite_engine):
     with database.SessionLocal() as session:
         Importer(session, ExcludedConstructorJolpica()).import_season(2024)
 
@@ -68,3 +58,60 @@ def test_excluded_constructors_have_no_position_and_are_listed_last():
         ("test-team", 1, "1"),
         ("excluded-team", None, "E"),
     ]
+
+
+class FailingStandingsJolpica(FakeJolpica):
+    def driver_standings(self, season):
+        raise UpstreamDataError("Jolpica standings total changed during pagination")
+
+
+class LaterRoundStandingsJolpica(FakeJolpica):
+    def driver_standings(self, season):
+        table = super().driver_standings(season)
+        return {**table, "round": 2}
+
+
+class EmptyStandingsJolpica(FakeJolpica):
+    def driver_standings(self, season):
+        return {"round": None, "standings": []}
+
+    def constructor_standings(self, season):
+        return {"round": None, "standings": []}
+
+
+def count(session, model):
+    return session.scalar(select(func.count()).select_from(model))
+
+
+def test_standings_failure_keeps_results_and_flags_the_run(sqlite_engine):
+    with database.SessionLocal() as session:
+        with pytest.raises(StandingsNotUpdatedError, match="could not be fetched") as error:
+            Importer(session, FailingStandingsJolpica()).import_season(2024)
+        assert error.value.counts["results"] == 1
+        assert count(session, RaceResult) == 1
+        assert count(session, DriverStanding) == 0
+
+
+def test_standings_from_another_round_are_not_stored(sqlite_engine):
+    with database.SessionLocal() as session:
+        with pytest.raises(StandingsNotUpdatedError, match="round 2, but results go to round 1"):
+            Importer(session, LaterRoundStandingsJolpica()).import_season(2024)
+        assert count(session, RaceResult) == 1
+        assert count(session, DriverStanding) == 0
+
+
+def test_empty_upstream_standings_keep_the_stored_ones(sqlite_engine):
+    with database.SessionLocal() as session:
+        Importer(session, FakeJolpica()).import_season(2024)
+        with pytest.raises(StandingsNotUpdatedError, match="kept the stored ones"):
+            Importer(session, EmptyStandingsJolpica()).import_season(2024)
+        assert count(session, DriverStanding) == 1
+        assert count(session, ConstructorStanding) == 1
+
+
+def test_seasons_without_standings_import_cleanly(sqlite_engine):
+    """Early seasons have no constructors' championship upstream; that is not an error."""
+    with database.SessionLocal() as session:
+        counts = Importer(session, EmptyStandingsJolpica()).import_season(2024)
+    assert counts["results"] == 1
+    assert counts["constructor_standings"] == 0

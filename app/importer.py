@@ -1,9 +1,10 @@
 from datetime import date
 
-from sqlalchemy import delete, select
+import httpx
+from sqlalchemy import delete, exists, select
 from sqlalchemy.orm import Session
 
-from app.jolpica import JolpicaClient
+from app.jolpica import JolpicaClient, UpstreamDataError
 from app.models import (
     Constructor,
     ConstructorStanding,
@@ -12,6 +13,14 @@ from app.models import (
     Race,
     RaceResult,
 )
+
+
+class StandingsNotUpdatedError(RuntimeError):
+    """Races and results were saved, but the stored standings were kept unchanged."""
+
+    def __init__(self, counts: dict[str, int], reason: str) -> None:
+        super().__init__(reason)
+        self.counts = counts
 
 
 class Importer:
@@ -33,11 +42,40 @@ class Importer:
             for result in result_payload["Results"]:
                 counts["results"] += self._upsert_result(race, result)
 
-        counts["driver_standings"] = self._import_driver_standings(season)
-        counts["constructor_standings"] = self._import_constructor_standings(season)
+        # Results are saved even if the standings below cannot be updated.
+        self.session.commit()
 
+        latest_round = max((int(item["round"]) for item in results if item["Results"]), default=None)
+        try:
+            driver_table = self.client.driver_standings(season)
+            constructor_table = self.client.constructor_standings(season)
+        except (UpstreamDataError, httpx.HTTPError) as error:
+            raise StandingsNotUpdatedError(counts, f"standings could not be fetched: {error}") from error
+
+        for name, model, table in (
+            ("driver", DriverStanding, driver_table),
+            ("constructor", ConstructorStanding, constructor_table),
+        ):
+            if table["standings"] and table["round"] != latest_round:
+                raise StandingsNotUpdatedError(
+                    counts,
+                    f"{name} standings are for round {table['round']}, "
+                    f"but results go to round {latest_round}",
+                )
+            if not table["standings"] and self._has_standings(model, season):
+                raise StandingsNotUpdatedError(
+                    counts, f"upstream returned no {name} standings; kept the stored ones"
+                )
+
+        counts["driver_standings"] = self._import_driver_standings(season, driver_table)
+        counts["constructor_standings"] = self._import_constructor_standings(
+            season, constructor_table
+        )
         self.session.commit()
         return counts
+
+    def _has_standings(self, model: type[DriverStanding | ConstructorStanding], season: int) -> bool:
+        return bool(self.session.scalar(select(exists().where(model.season == season))))
 
     def _upsert_race(self, season: int, round_number: int, payload: dict) -> tuple[Race, int]:
         race = self.session.scalar(select(Race).where(Race.season == season, Race.round == round_number))
@@ -68,8 +106,9 @@ class Importer:
         self.session.add(result)
         return created
 
-    def _import_driver_standings(self, season: int) -> int:
-        table = self.client.driver_standings(season)
+    def _import_driver_standings(self, season: int, table: dict) -> int:
+        if not table["standings"]:
+            return 0
         created = 0
         driver_ids = []
         for payload in table["standings"]:
@@ -91,8 +130,9 @@ class Importer:
         )
         return created
 
-    def _import_constructor_standings(self, season: int) -> int:
-        table = self.client.constructor_standings(season)
+    def _import_constructor_standings(self, season: int, table: dict) -> int:
+        if not table["standings"]:
+            return 0
         created = 0
         constructor_ids = []
         for payload in table["standings"]:

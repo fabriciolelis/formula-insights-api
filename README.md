@@ -23,6 +23,13 @@ the latest imported round, so they include sprint points, penalties, and
 exclusions. Excluded entries have no numeric `position` (for example,
 `position_text` is `E`) and are listed last.
 
+Races and results are saved first. Standings replace the stored ones only when
+they are complete and from the same round as the latest results; otherwise the
+previous standings are kept and the import exits with code 1 and the reason,
+so a scheduled run shows as failed and retries next time. Seasons imported
+before standings were added return empty standings until they are imported
+again.
+
 ## Responsibilities
 
 - Validate and serve HTTP requests.
