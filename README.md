@@ -79,7 +79,7 @@ GitHub Actions builds and tests the image. It does not deploy directly to Kubern
 
 ## Documentation
 
-Platform decisions, SLOs, runbooks, and postmortems live in the `formula-docs` repository. See in particular ADR-002 (data source) and ADR-003 (GitOps delivery).
+Platform decisions, SLOs, runbooks, and postmortems live in the `platform-docs` repository. See in particular ADR-002 (data source) and ADR-003 (GitOps delivery).
 
 ## Security
 
