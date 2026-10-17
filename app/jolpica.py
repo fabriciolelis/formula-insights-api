@@ -66,6 +66,52 @@ class JolpicaClient:
             )
         return [races_by_round[round_number] for round_number in sorted(races_by_round, key=int)]
 
+    def driver_standings(self, season: int) -> dict:
+        return self._paginate_standings(f"{season}/driverStandings.json", "DriverStandings")
+
+    def constructor_standings(self, season: int) -> dict:
+        return self._paginate_standings(
+            f"{season}/constructorStandings.json", "ConstructorStandings"
+        )
+
+    def _paginate_standings(self, path: str, key: str) -> dict:
+        """Return the official standings after the latest round as {"round": int, "standings": [...]}."""
+        offset = 0
+        expected_total: int | None = None
+        round_number: int | None = None
+        standings: list[dict] = []
+
+        while expected_total is None or len(standings) < expected_total:
+            payload = self._get(path, {"limit": self.PAGE_SIZE, "offset": offset})
+            metadata = payload["MRData"]
+            page_total = int(metadata["total"])
+            if expected_total is None:
+                expected_total = page_total
+            elif page_total != expected_total:
+                raise UpstreamDataError("Jolpica standings total changed during pagination")
+            if expected_total == 0:
+                return {"round": None, "standings": []}
+
+            lists = metadata["StandingsTable"]["StandingsLists"]
+            page_rows = lists[0][key] if lists else []
+            if not page_rows:
+                raise UpstreamDataError(
+                    f"Jolpica returned an empty standings page at offset {offset} before {expected_total} rows"
+                )
+            page_round = int(lists[0]["round"])
+            if round_number is None:
+                round_number = page_round
+            elif page_round != round_number:
+                raise UpstreamDataError("Jolpica standings round changed during pagination")
+            standings.extend(deepcopy(page_rows))
+            if len(standings) > expected_total:
+                raise UpstreamDataError(
+                    f"Jolpica returned {len(standings)} standings although its total is {expected_total}"
+                )
+            offset += len(page_rows)
+
+        return {"round": round_number, "standings": standings}
+
     def _paginate_races(self, path: str) -> list[dict]:
         offset = 0
         expected_total: int | None = None
