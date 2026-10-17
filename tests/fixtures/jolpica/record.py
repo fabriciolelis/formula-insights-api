@@ -21,8 +21,8 @@ class RecordingJolpicaClient(JolpicaClient):
         payload = super()._get(path, params)
         target = fixture_path(path, params["offset"])
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n", encoding="utf-8", newline="
-")
+        content = json.dumps(payload, indent=1, sort_keys=True) + "\n"
+        target.write_text(content, encoding="utf-8", newline="\n")
         return payload
 
 
