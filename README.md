@@ -64,7 +64,7 @@ ruff check .
 Every pull request must, at minimum:
 
 - run unit tests;
-- run an end-to-end import test against a disposable database;
+- run an end-to-end import test against a disposable database (planned);
 - build the container image;
 - check formatting and static analysis;
 - scan dependencies and container image vulnerabilities.
