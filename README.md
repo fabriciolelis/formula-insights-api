@@ -43,20 +43,24 @@ documented read endpoints.
 ```powershell
 docker compose up -d postgres
 Copy-Item .env.example .env
-python -m pip install -e ".[dev]"
-python -m app.cli 2024
-uvicorn app.main:app --reload
+uv sync --extra dev
+uv run python -m app.cli 2024
+uv run uvicorn app.main:app --reload
 ```
 
 The API is then available at `http://localhost:8000`; interactive endpoint
-documentation is at `/docs`. Re-running `python -m app.cli 2024` is safe: the
+documentation is at `/docs`. Re-running `uv run python -m app.cli 2024` is safe: the
 importer updates existing rows rather than creating duplicates.
+
+Dependencies are locked in `uv.lock`; install [uv](https://docs.astral.sh/uv/) first.
+After changing dependencies in `pyproject.toml`, run `uv lock` and commit the
+updated lockfile.
 
 Run the first automated check with:
 
 ```powershell
-pytest
-ruff check .
+uv run pytest
+uv run ruff check .
 ```
 
 ## Quality gates

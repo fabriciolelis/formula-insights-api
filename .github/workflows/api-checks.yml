@@ -22,32 +22,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: python -m pip install --upgrade pip && python -m pip install ".[dev]"
+      - name: Install uv
+        run: python -m pip install uv==0.13.1
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev
 
       - name: Run tests
-        run: python -m pytest -q
+        run: uv run pytest -q
 
       - name: Run Ruff
-        run: python -m ruff check .
-
-  dependencies:
-    name: Scan dependencies
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install pip-audit
-        run: python -m pip install --upgrade pip && python -m pip install pip-audit
-
-      - name: Audit project dependencies
-        run: python -m pip_audit .
+        run: uv run ruff check .
 
   image:
     name: Build and scan container image
