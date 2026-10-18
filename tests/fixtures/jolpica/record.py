@@ -31,6 +31,8 @@ def main() -> None:
     client = RecordingJolpicaClient()
     client.races(season)
     client.results(season)
+    client.driver_standings(season)
+    client.constructor_standings(season)
 
 
 if __name__ == "__main__":

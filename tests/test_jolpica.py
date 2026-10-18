@@ -97,3 +97,50 @@ def test_results_rejects_an_incomplete_page_sequence():
 
     with pytest.raises(UpstreamDataError, match="empty result page"):
         client.results(2024)
+
+
+def standings_page(total: int, round_number: str, rows: list[dict]) -> dict:
+    return {
+        "MRData": {
+            "total": str(total),
+            "StandingsTable": {
+                "StandingsLists": [{"round": round_number, "DriverStandings": rows}]
+            },
+        }
+    }
+
+
+class StubStandingsClient(JolpicaClient):
+    def __init__(self, pages: dict[int, dict]) -> None:
+        super().__init__(base_url="https://example.test")
+        self.pages = pages
+
+    def _get(self, path: str, params: dict[str, int]) -> dict:
+        assert path == "2024/driverStandings.json"
+        return deepcopy(self.pages[params["offset"]])
+
+
+def test_driver_standings_paginate_and_keep_the_round():
+    client = StubStandingsClient(
+        {
+            0: standings_page(3, "24", [{"position": "1"}, {"position": "2"}]),
+            2: standings_page(3, "24", [{"position": "3"}]),
+        }
+    )
+
+    table = client.driver_standings(2024)
+
+    assert table["round"] == 24
+    assert [row["position"] for row in table["standings"]] == ["1", "2", "3"]
+
+
+def test_driver_standings_reject_a_round_change_during_pagination():
+    client = StubStandingsClient(
+        {
+            0: standings_page(3, "23", [{"position": "1"}, {"position": "2"}]),
+            2: standings_page(3, "24", [{"position": "3"}]),
+        }
+    )
+
+    with pytest.raises(UpstreamDataError, match="round changed"):
+        client.driver_standings(2024)

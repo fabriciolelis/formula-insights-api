@@ -17,6 +17,16 @@ class FakeJolpica:
                  "familyName": "Driver", "nationality": "Test"}, "Constructor": {"constructorId": "test-team",
                  "name": "Test Team", "nationality": "Test"}}]}]
 
+    def driver_standings(self, season):
+        return {"round": 1, "standings": [{"position": "1", "positionText": "1", "points": "25",
+                "wins": "1", "Driver": {"driverId": "test-driver", "givenName": "Test",
+                "familyName": "Driver", "nationality": "Test"}}]}
+
+    def constructor_standings(self, season):
+        return {"round": 1, "standings": [{"position": "1", "positionText": "1", "points": "25",
+                "wins": "1", "Constructor": {"constructorId": "test-team", "name": "Test Team",
+                "nationality": "Test"}}]}
+
 
 def test_import_is_idempotent():
     engine = create_engine("sqlite://")
@@ -24,7 +34,11 @@ def test_import_is_idempotent():
     session = sessionmaker(bind=engine)()
     importer = Importer(session, FakeJolpica())
 
-    assert importer.import_season(2024) == {"races": 1, "results": 1}
-    assert importer.import_season(2024) == {"races": 0, "results": 0}
+    assert importer.import_season(2024) == {
+        "races": 1, "results": 1, "driver_standings": 1, "constructor_standings": 1
+    }
+    assert importer.import_season(2024) == {
+        "races": 0, "results": 0, "driver_standings": 0, "constructor_standings": 0
+    }
     assert session.scalar(select(func.count()).select_from(Race)) == 1
     assert session.scalar(select(func.count()).select_from(RaceResult)) == 1
