@@ -1,3 +1,5 @@
+"""HTTP API serving imported Formula 1 races, results, and standings."""
+
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -17,6 +19,7 @@ from app.models import (
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    """Create missing tables when the application starts."""
     create_schema()
     yield
 
@@ -25,17 +28,24 @@ app = FastAPI(title="Formula Insights API", version="0.1.0", lifespan=lifespan)
 
 
 def session_dependency():
+    """Provide a database session for one request and close it afterwards.
+
+    Yields:
+        A SQLAlchemy session.
+    """
     with SessionLocal() as session:
         yield session
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
+    """Liveness check: reports that the process is running, without touching the database."""
     return {"status": "ok"}
 
 
 @app.get("/seasons/{year}/races")
 def season_races(year: int, session: Session = Depends(session_dependency)):
+    """Races of a season in round order, with date and circuit."""
     races = session.scalars(select(Race).where(Race.season == year).order_by(Race.round)).all()
     return [
         {
@@ -96,6 +106,7 @@ def constructor_standings(year: int, session: Session = Depends(session_dependen
 
 @app.get("/seasons/{year}/races/{round_number}/results")
 def race_results(year: int, round_number: int, session: Session = Depends(session_dependency)):
+    """Results of one race in finishing order; returns 404 if the race is unknown."""
     race = session.scalar(select(Race).where(Race.season == year, Race.round == round_number))
     if race is None:
         raise HTTPException(status_code=404, detail="race not found")

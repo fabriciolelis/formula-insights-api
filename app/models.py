@@ -1,3 +1,5 @@
+"""SQLAlchemy models for the Formula 1 data imported from Jolpica."""
+
 from datetime import date
 
 from sqlalchemy import Float, ForeignKey, String, UniqueConstraint
@@ -7,6 +9,18 @@ from app.database import Base
 
 
 class Race(Base):
+    """A Grand Prix in a season, identified by season and round.
+
+    Attributes:
+        id: Surrogate primary key.
+        season: Championship year, for example 2024.
+        round: Round number within the season, starting at 1.
+        name: Official race name, for example "Bahrain Grand Prix".
+        race_date: Date of the race.
+        circuit_id: Jolpica circuit identifier.
+        circuit_name: Human-readable circuit name.
+    """
+
     __tablename__ = "races"
     __table_args__ = (UniqueConstraint("season", "round", name="uq_race_season_round"),)
 
@@ -20,6 +34,15 @@ class Race(Base):
 
 
 class Driver(Base):
+    """A driver, shared across seasons.
+
+    Attributes:
+        id: Jolpica driver identifier, for example "max_verstappen".
+        given_name: Driver's given name.
+        family_name: Driver's family name.
+        nationality: Nationality as published by Jolpica, if known.
+    """
+
     __tablename__ = "drivers"
 
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
@@ -29,6 +52,14 @@ class Driver(Base):
 
 
 class Constructor(Base):
+    """A constructor (team), shared across seasons.
+
+    Attributes:
+        id: Jolpica constructor identifier, for example "mclaren".
+        name: Team name.
+        nationality: Nationality as published by Jolpica, if known.
+    """
+
     __tablename__ = "constructors"
 
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
@@ -37,6 +68,21 @@ class Constructor(Base):
 
 
 class RaceResult(Base):
+    """One driver's Grand Prix result; a driver has at most one result per race.
+
+    Attributes:
+        id: Surrogate primary key.
+        race_id: The race this result belongs to.
+        driver_id: The classified driver.
+        constructor_id: The team the driver raced for in this race.
+        position: Finishing position, or None when the driver was not
+            classified (for example retired or disqualified).
+        position_text: Position as published, for example "1", "R" or "D".
+        points: Championship points scored in this race (Grand Prix only;
+            sprint points are reflected in the standings tables).
+        status: Finishing status, for example "Finished" or "+1 Lap".
+    """
+
     __tablename__ = "race_results"
     __table_args__ = (UniqueConstraint("race_id", "driver_id", name="uq_result_race_driver"),)
 
@@ -51,7 +97,21 @@ class RaceResult(Base):
 
 
 class DriverStanding(Base):
-    """Official driver championship standings after the latest imported round."""
+    """Official driver championship standings after the latest imported round.
+
+    Mirrors Jolpica's published table, so totals include sprint points,
+    penalties, and exclusions.
+
+    Attributes:
+        id: Surrogate primary key.
+        season: Championship year.
+        round: The round these standings reflect.
+        driver_id: The driver.
+        position: Championship position, or None for excluded drivers.
+        position_text: Position as published, for example "1" or "E".
+        points: Championship points.
+        wins: Number of race wins.
+    """
 
     __tablename__ = "driver_standings"
     __table_args__ = (
@@ -69,7 +129,21 @@ class DriverStanding(Base):
 
 
 class ConstructorStanding(Base):
-    """Official constructor championship standings after the latest imported round."""
+    """Official constructor championship standings after the latest imported round.
+
+    Mirrors Jolpica's published table, so totals include sprint points,
+    penalties, and exclusions (for example McLaren in 2007).
+
+    Attributes:
+        id: Surrogate primary key.
+        season: Championship year.
+        round: The round these standings reflect.
+        constructor_id: The constructor.
+        position: Championship position, or None for excluded constructors.
+        position_text: Position as published, for example "1" or "E".
+        points: Championship points.
+        wins: Number of race wins.
+    """
 
     __tablename__ = "constructor_standings"
     __table_args__ = (

@@ -1,3 +1,5 @@
+"""Client for the Jolpica F1 API (Ergast-compatible historical data)."""
+
 import os
 from copy import deepcopy
 
@@ -9,7 +11,16 @@ class UpstreamDataError(RuntimeError):
 
 
 class JolpicaClient:
-    """Small client for the Jolpica Ergast-compatible historical API."""
+    """Client for the Jolpica Ergast-compatible historical API.
+
+    Every list endpoint is read with offset pagination, and the rows received
+    must match the total Jolpica reports, so a season is never imported
+    partially (ADR-006).
+
+    Args:
+        base_url: API root. Defaults to `JOLPICA_BASE_URL`, then the public
+            Jolpica endpoint.
+    """
 
     PAGE_SIZE = 100
 
@@ -17,9 +28,37 @@ class JolpicaClient:
         self.base_url = base_url or os.getenv("JOLPICA_BASE_URL", "https://api.jolpi.ca/ergast/f1")
 
     def races(self, season: int) -> list[dict]:
+        """Return every race of a season.
+
+        Args:
+            season: Championship year.
+
+        Returns:
+            Race payloads as published by Jolpica, including circuit details.
+
+        Raises:
+            UpstreamDataError: If pages are missing or totals are inconsistent.
+            httpx.HTTPError: If a request fails.
+        """
         return self._paginate_races(f"{season}/races.json")
 
     def results(self, season: int) -> list[dict]:
+        """Return every Grand Prix result of a season, grouped by race.
+
+        Results of a race can span several pages; they are merged so each race
+        appears once, in round order.
+
+        Args:
+            season: Championship year.
+
+        Returns:
+            Race payloads, each with its complete `Results` list.
+
+        Raises:
+            UpstreamDataError: If pages are missing or the row count does not
+                match the reported total.
+            httpx.HTTPError: If a request fails.
+        """
         path = f"{season}/results.json"
         offset = 0
         expected_total: int | None = None
@@ -67,15 +106,44 @@ class JolpicaClient:
         return [races_by_round[round_number] for round_number in sorted(races_by_round, key=int)]
 
     def driver_standings(self, season: int) -> dict:
+        """Return the official driver standings after the latest round.
+
+        Args:
+            season: Championship year.
+
+        Returns:
+            `{"round": int | None, "standings": [...]}`; the list is empty and
+            the round is None when Jolpica has no standings for the season.
+
+        Raises:
+            UpstreamDataError: If pages are missing, totals change, or the round
+                changes during pagination.
+            httpx.HTTPError: If a request fails.
+        """
         return self._paginate_standings(f"{season}/driverStandings.json", "DriverStandings")
 
     def constructor_standings(self, season: int) -> dict:
+        """Return the official constructor standings after the latest round.
+
+        Args:
+            season: Championship year.
+
+        Returns:
+            `{"round": int | None, "standings": [...]}`; the list is empty and
+            the round is None when Jolpica has no standings for the season
+            (there was no constructors' championship before 1958).
+
+        Raises:
+            UpstreamDataError: If pages are missing, totals change, or the round
+                changes during pagination.
+            httpx.HTTPError: If a request fails.
+        """
         return self._paginate_standings(
             f"{season}/constructorStandings.json", "ConstructorStandings"
         )
 
     def _paginate_standings(self, path: str, key: str) -> dict:
-        """Return the official standings after the latest round as {"round": int, "standings": [...]}."""
+        """Read a paginated standings resource; see `driver_standings` for the result shape."""
         offset = 0
         expected_total: int | None = None
         round_number: int | None = None
@@ -143,6 +211,7 @@ class JolpicaClient:
         return races
 
     def _get(self, path: str, params: dict[str, int]) -> dict:
+        """Send one GET request identifying this application (ADR-002) and return the JSON body."""
         headers = {"User-Agent": "formula-insights-api/0.1 (portfolio project)"}
         with httpx.Client(timeout=30, headers=headers) as client:
             response = client.get(f"{self.base_url}/{path}", params=params)

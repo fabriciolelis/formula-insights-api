@@ -1,3 +1,5 @@
+"""Idempotent import of a Formula 1 season from Jolpica into the database."""
+
 from datetime import date
 
 import httpx
@@ -16,7 +18,15 @@ from app.models import (
 
 
 class StandingsNotUpdatedError(RuntimeError):
-    """Races and results were saved, but the stored standings were kept unchanged."""
+    """Races and results were saved, but the stored standings were kept unchanged.
+
+    Args:
+        counts: New rows per entity that were saved before standings failed.
+        reason: Why the standings were not updated.
+
+    Attributes:
+        counts: New rows per entity that were saved before standings failed.
+    """
 
     def __init__(self, counts: dict[str, int], reason: str) -> None:
         super().__init__(reason)
@@ -24,11 +34,38 @@ class StandingsNotUpdatedError(RuntimeError):
 
 
 class Importer:
+    """Imports a season idempotently: re-running it updates rows instead of duplicating them.
+
+    Args:
+        session: Database session the import writes to.
+        client: Source of Jolpica data (a fixture client in tests).
+    """
+
     def __init__(self, session: Session, client: JolpicaClient) -> None:
         self.session = session
         self.client = client
 
     def import_season(self, season: int) -> dict[str, int]:
+        """Import races, results, and official standings for one season.
+
+        Races and results are committed first. Standings replace the stored
+        ones only when they are complete and from the same round as the latest
+        results; otherwise the stored standings are kept (ADR-006).
+
+        Args:
+            season: Championship year.
+
+        Returns:
+            New rows per entity: `races`, `results`, `driver_standings`, and
+            `constructor_standings`. Updated rows are not counted.
+
+        Raises:
+            StandingsNotUpdatedError: If races and results were saved but the
+                standings could not be fetched, came from another round, or
+                were empty although standings were already stored.
+            UpstreamDataError: If races or results are incomplete; nothing is saved.
+            httpx.HTTPError: If fetching races or results fails; nothing is saved.
+        """
         races = {int(race["round"]): race for race in self.client.races(season)}
         results = self.client.results(season)
         counts = {"races": 0, "results": 0, "driver_standings": 0, "constructor_standings": 0}
@@ -107,6 +144,7 @@ class Importer:
         return created
 
     def _import_driver_standings(self, season: int, table: dict) -> int:
+        """Upsert driver standings and delete rows no longer published upstream."""
         if not table["standings"]:
             return 0
         created = 0
@@ -131,6 +169,7 @@ class Importer:
         return created
 
     def _import_constructor_standings(self, season: int, table: dict) -> int:
+        """Upsert constructor standings and delete rows no longer published upstream."""
         if not table["standings"]:
             return 0
         created = 0
@@ -160,6 +199,7 @@ class Importer:
     def _apply_standing(
         standing: DriverStanding | ConstructorStanding, round_number: int, payload: dict
     ) -> None:
+        """Copy one standings row; entries without a numeric position (excluded) get None."""
         position = payload.get("position", "")
         standing.round = round_number
         standing.position = int(position) if position.isdigit() else None
