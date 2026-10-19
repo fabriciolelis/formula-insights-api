@@ -89,6 +89,11 @@ uv run pytest
 
 To re-record the fixtures, run `uv run python -m tests.fixtures.jolpica.record 2024`.
 
+Public modules, classes, and functions in `app/` need
+[Google-style docstrings](https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings);
+`ruff check` enforces them (tests are exempt). Endpoint docstrings also appear
+as descriptions on the interactive `/docs` page.
+
 Static analysis uses [Semgrep](https://semgrep.dev/) with the `p/python` and
 `p/secrets` rulesets; CI fails on ERROR-severity findings. To run it locally,
 install it with `uv tool install semgrep`, then:
