@@ -4,6 +4,20 @@ import os
 from copy import deepcopy
 
 import httpx
+from pyrate_limiter import Duration, Limiter, Rate
+
+# ADR-006: stay under Jolpica's 4 requests/s burst and 500 requests/hour limits.
+REQUEST_RATES = [Rate(1, Duration.SECOND), Rate(450, Duration.HOUR)]
+
+
+def default_limiter() -> Limiter:
+    """Return a limiter that paces requests as ADR-006 requires.
+
+    Returns:
+        An in-memory limiter allowing at most 1 request per second and 450 per
+        rolling hour. It waits for capacity instead of failing.
+    """
+    return Limiter(REQUEST_RATES)
 
 
 class UpstreamDataError(RuntimeError):
@@ -17,15 +31,22 @@ class JolpicaClient:
     must match the total Jolpica reports, so a season is never imported
     partially (ADR-006).
 
+    Every request waits for the client's limiter, so all requests sent through
+    one client share a single budget; use one client for a whole run, including
+    a multi-season backfill. The client never retries: an HTTP error such as
+    `429` is raised to the caller.
+
     Args:
         base_url: API root. Defaults to `JOLPICA_BASE_URL`, then the public
             Jolpica endpoint.
+        limiter: Paces the requests. Defaults to `default_limiter()`.
     """
 
     PAGE_SIZE = 100
 
-    def __init__(self, base_url: str | None = None) -> None:
+    def __init__(self, base_url: str | None = None, limiter: Limiter | None = None) -> None:
         self.base_url = base_url or os.getenv("JOLPICA_BASE_URL", "https://api.jolpi.ca/ergast/f1")
+        self.limiter = limiter or default_limiter()
 
     def races(self, season: int) -> list[dict]:
         """Return every race of a season.
@@ -211,7 +232,11 @@ class JolpicaClient:
         return races
 
     def _get(self, path: str, params: dict[str, int]) -> dict:
-        """Send one GET request identifying this application (ADR-002) and return the JSON body."""
+        """Wait for the limiter, then send one GET request identifying this application (ADR-002).
+
+        Returns the JSON body; raises `httpx.HTTPStatusError` for an error status.
+        """
+        self.limiter.try_acquire("jolpica")
         headers = {"User-Agent": "formula-insights-api/0.1 (portfolio project)"}
         with httpx.Client(timeout=30, headers=headers) as client:
             response = client.get(f"{self.base_url}/{path}", params=params)
