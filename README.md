@@ -64,6 +64,22 @@ The API is then available at `http://localhost:8000`; interactive endpoint
 documentation is at `/docs`. Re-running `uv run python -m app.cli 2024` is safe: the
 importer updates existing rows rather than creating duplicates.
 
+To import several seasons, such as a historical backfill, pass an inclusive
+range in one command:
+
+```powershell
+uv run python -m app.cli 1950 2024
+```
+
+Requests to Jolpica are paced to at most 1 per second and 450 per rolling hour
+(ADR-006), using [pyrate-limiter](https://github.com/vutran1710/PyrateLimiter).
+Pacing lives in memory and is shared by every season of one command, so run a
+backfill as a single range rather than one command per season; it takes more
+than an hour by design. The import stops at the first season that fails and
+exits with code 1 and a one-line reason, for example
+`Import of season 2023 failed: Jolpica rate limit exceeded (HTTP 429), retry after 60 s`.
+The client never retries; rerun from the failed season.
+
 Dependencies are locked in `uv.lock`; install [uv](https://docs.astral.sh/uv/) first.
 After changing dependencies in `pyproject.toml`, run `uv lock` and commit the
 updated lockfile.
