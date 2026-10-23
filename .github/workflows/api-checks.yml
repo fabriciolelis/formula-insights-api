@@ -45,10 +45,20 @@ jobs:
         run: uv sync --frozen --extra dev
 
       - name: Run tests
-        run: uv run pytest -q
+        run: uv run pytest -q --junitxml=test-results/junit.xml
+
+      - name: Summarize test results
+        if: ${{ !cancelled() }}
+        uses: mikepenz/action-junit-report@6ef3fdcfcd5f0b5d14df3e659ef19b8c6820f93d # v6.6.1
+        with:
+          report_paths: test-results/junit.xml
+          # Annotations and job summary only: no check run, so no checks: write.
+          annotate_only: true
+          detailed_summary: true
+          require_tests: true
 
       - name: Run Ruff
-        run: uv run ruff check .
+        run: uv run ruff check . --output-format github
 
   image:
     name: Build and scan container image
@@ -73,7 +83,23 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           format: table
+          output: trivy-report.txt
           trivyignores: .trivyignore
+
+      - name: Summarize image scan
+        if: ${{ !cancelled() }}
+        run: |
+          cat trivy-report.txt
+          {
+            echo "## Image scan (HIGH and CRITICAL)"
+            echo '```text'
+            cat trivy-report.txt
+            echo '```'
+            echo "### Accepted vulnerabilities (.trivyignore)"
+            echo "| Vulnerability | Expires |"
+            echo "| --- | --- |"
+            grep -E '^(CVE|GHSA)-' .trivyignore | awk '{ sub("exp:", "", $2); print "| " $1 " | " $2 " |" }'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # The SBOM and the image archive are produced on every run so pull
       # requests exercise them; only the publish job on main pushes anything.
@@ -85,7 +111,13 @@ jobs:
           output: sbom.cdx.json
 
       - name: Save scanned image
-        run: docker save --output image.tar formula-insights-api:ci
+        run: |
+          docker save --output image.tar formula-insights-api:ci
+          {
+            echo "### Image contents"
+            echo "- Image size: $(docker image inspect --format '{{.Size}}' formula-insights-api:ci | numfmt --to=iec) (uncompressed)"
+            echo "- Packages in the SBOM: $(jq '.components | length' sbom.cdx.json)"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload scanned image and SBOM
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -141,9 +173,9 @@ jobs:
           docker push "$IMAGE:$GITHUB_SHA"
           digest=$(docker buildx imagetools inspect "$IMAGE:$GITHUB_SHA" --format '{{json .Manifest}}' | jq -r .digest)
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-          echo "Published $IMAGE@$digest" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Attest build provenance
+        id: provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE }}
@@ -151,6 +183,7 @@ jobs:
           push-to-registry: true
 
       - name: Attest SBOM
+        id: sbom
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE }}
@@ -158,9 +191,36 @@ jobs:
           sbom-path: sbom.cdx.json
           push-to-registry: true
 
+      - name: Summarize published image
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          PROVENANCE_URL: ${{ steps.provenance.outputs.attestation-url }}
+          SBOM_URL: ${{ steps.sbom.outputs.attestation-url }}
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Published image
+          | | |
+          | --- | --- |
+          | Image | \`$IMAGE:$GITHUB_SHA\` |
+          | Digest | \`$DIGEST\` |
+          | Package | [GHCR package](https://github.com/fabriciolelis/formula-insights-api/pkgs/container/formula-insights-api) |
+          | Provenance | [attestation]($PROVENANCE_URL) |
+          | SBOM | [attestation]($SBOM_URL) |
+
+          Pull and verify:
+          \`\`\`shell
+          docker pull $IMAGE@$DIGEST
+          gh attestation verify oci://$IMAGE:$GITHUB_SHA --owner fabriciolelis
+          gh attestation verify oci://$IMAGE:$GITHUB_SHA --owner fabriciolelis --predicate-type https://cyclonedx.org/bom
+          \`\`\`
+          EOF
+
   sast:
     name: Static analysis
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload Semgrep results to code scanning
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -174,7 +234,14 @@ jobs:
         run: python -m pip install semgrep==1.181.0
 
       - name: Report all findings
-        run: semgrep scan --config p/python --config p/secrets --metrics off
+        run: semgrep scan --config p/python --config p/secrets --metrics off --sarif-output=semgrep.sarif
+
+      - name: Upload findings to code scanning
+        if: ${{ !cancelled() }}
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
 
       - name: Fail on ERROR findings
         run: semgrep scan --config p/python --config p/secrets --metrics off --severity ERROR --error --quiet
