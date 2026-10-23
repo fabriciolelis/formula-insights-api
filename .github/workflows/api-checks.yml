@@ -56,9 +56,15 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # This job uploads an artifact; keep the token out of the workspace.
+          persist-credentials: false
 
       - name: Build image
-        run: docker build --tag formula-insights-api:ci .
+        run: >-
+          docker build
+          --label org.opencontainers.image.revision=${{ github.sha }}
+          --tag formula-insights-api:ci .
 
       - name: Scan image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -68,6 +74,89 @@ jobs:
           exit-code: "1"
           format: table
           trivyignores: .trivyignore
+
+      # The SBOM and the image archive are produced on every run so pull
+      # requests exercise them; only the publish job on main pushes anything.
+      - name: Generate SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: formula-insights-api:ci
+          format: cyclonedx
+          output: sbom.cdx.json
+
+      - name: Save scanned image
+        run: docker save --output image.tar formula-insights-api:ci
+
+      - name: Upload scanned image and SBOM
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scanned-image
+          path: |
+            image.tar
+            sbom.cdx.json
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: error
+
+  publish:
+    name: Publish image
+    # Publishes the exact image that was scanned, only after every check passed.
+    needs: [test, image, sast]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    env:
+      IMAGE: ghcr.io/fabriciolelis/formula-insights-api
+    steps:
+      - name: Download scanned image and SBOM
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: scanned-image
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tags are immutable: a re-run builds a new image, which must never
+      # replace the one already published for this commit.
+      - name: Refuse to overwrite an existing tag
+        run: |
+          if docker buildx imagetools inspect "$IMAGE:$GITHUB_SHA" > /dev/null 2>&1; then
+            echo "::error::$IMAGE:$GITHUB_SHA is already published; tags are never overwritten. Push a new commit to publish again."
+            exit 1
+          fi
+
+      - name: Push image
+        id: push
+        run: |
+          docker load --input image.tar
+          docker tag formula-insights-api:ci "$IMAGE:$GITHUB_SHA"
+          docker push "$IMAGE:$GITHUB_SHA"
+          digest=$(docker buildx imagetools inspect "$IMAGE:$GITHUB_SHA" --format '{{json .Manifest}}' | jq -r .digest)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "Published $IMAGE@$digest" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: sbom.cdx.json
+          push-to-registry: true
 
   sast:
     name: Static analysis

@@ -9,6 +9,10 @@ RUN uv sync --frozen --no-dev
 
 FROM python:3.12-slim
 
+LABEL org.opencontainers.image.source="https://github.com/fabriciolelis/formula-insights-api" \
+      org.opencontainers.image.description="Formula Insights API and season importer" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
 WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
 COPY app ./app
