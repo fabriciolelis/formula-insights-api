@@ -29,6 +29,10 @@ jobs:
           --health-retries 10
     env:
       TEST_DATABASE_URL: postgresql+psycopg://formula_insights:formula_insights@localhost:5432/formula_insights_test
+    outputs:
+      passed: ${{ steps.junit.outputs.passed }}
+      failed: ${{ steps.junit.outputs.failed }}
+      skipped: ${{ steps.junit.outputs.skipped }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -45,14 +49,29 @@ jobs:
         run: uv sync --frozen --extra dev
 
       - name: Run tests
-        run: uv run pytest -q
+        run: uv run pytest -q --junitxml=test-results/junit.xml
+
+      - name: Summarize test results
+        id: junit
+        if: ${{ !cancelled() }}
+        uses: mikepenz/action-junit-report@6ef3fdcfcd5f0b5d14df3e659ef19b8c6820f93d # v6.6.1
+        with:
+          report_paths: test-results/junit.xml
+          # Annotations and job summary only: no check run, so no checks: write.
+          annotate_only: true
+          detailed_summary: true
+          require_tests: true
 
       - name: Run Ruff
-        run: uv run ruff check .
+        run: uv run ruff check . --output-format github
 
   image:
     name: Build and scan container image
     runs-on: ubuntu-latest
+    outputs:
+      vulnerabilities: ${{ steps.scan-summary.outputs.vulnerabilities }}
+      accepted: ${{ steps.scan-summary.outputs.accepted }}
+      packages: ${{ steps.contents.outputs.packages }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -73,7 +92,32 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           format: table
+          output: trivy-report.txt
           trivyignores: .trivyignore
+
+      - name: Summarize image scan
+        id: scan-summary
+        if: ${{ !cancelled() }}
+        run: |
+          if [ ! -f trivy-report.txt ]; then
+            echo "No scan report: the image was not scanned."
+            exit 0
+          fi
+          cat trivy-report.txt
+          vulnerabilities=$(grep -oE '^Total: [0-9]+' trivy-report.txt | awk '{ s += $2 } END { print s + 0 }')
+          accepted=$(grep -cE '^(CVE|GHSA)-' .trivyignore || true)
+          echo "vulnerabilities=$vulnerabilities" >> "$GITHUB_OUTPUT"
+          echo "accepted=$accepted" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Image scan (HIGH and CRITICAL)"
+            echo '```text'
+            cat trivy-report.txt
+            echo '```'
+            echo "### Accepted vulnerabilities (.trivyignore)"
+            echo "| Vulnerability | Expires |"
+            echo "| --- | --- |"
+            grep -E '^(CVE|GHSA)-' .trivyignore | awk '{ sub("exp:", "", $2); print "| " $1 " | " $2 " |" }'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # The SBOM and the image archive are produced on every run so pull
       # requests exercise them; only the publish job on main pushes anything.
@@ -85,7 +129,16 @@ jobs:
           output: sbom.cdx.json
 
       - name: Save scanned image
-        run: docker save --output image.tar formula-insights-api:ci
+        id: contents
+        run: |
+          docker save --output image.tar formula-insights-api:ci
+          packages=$(jq '.components | length' sbom.cdx.json)
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Image contents"
+            echo "- Image size: $(docker image inspect --format '{{.Size}}' formula-insights-api:ci | numfmt --to=iec) (uncompressed)"
+            echo "- Packages in the SBOM: $packages"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload scanned image and SBOM
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -111,6 +164,8 @@ jobs:
       id-token: write
     env:
       IMAGE: ghcr.io/fabriciolelis/formula-insights-api
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - name: Download scanned image and SBOM
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -141,9 +196,9 @@ jobs:
           docker push "$IMAGE:$GITHUB_SHA"
           digest=$(docker buildx imagetools inspect "$IMAGE:$GITHUB_SHA" --format '{{json .Manifest}}' | jq -r .digest)
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-          echo "Published $IMAGE@$digest" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Attest build provenance
+        id: provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE }}
@@ -151,6 +206,7 @@ jobs:
           push-to-registry: true
 
       - name: Attest SBOM
+        id: sbom
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE }}
@@ -158,9 +214,39 @@ jobs:
           sbom-path: sbom.cdx.json
           push-to-registry: true
 
+      - name: Summarize published image
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          PROVENANCE_URL: ${{ steps.provenance.outputs.attestation-url }}
+          SBOM_URL: ${{ steps.sbom.outputs.attestation-url }}
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Published image
+          | | |
+          | --- | --- |
+          | Image | \`$IMAGE:$GITHUB_SHA\` |
+          | Digest | \`$DIGEST\` |
+          | Package | [GHCR package](https://github.com/fabriciolelis/formula-insights-api/pkgs/container/formula-insights-api) |
+          | Provenance | [attestation]($PROVENANCE_URL) |
+          | SBOM | [attestation]($SBOM_URL) |
+
+          Pull and verify:
+          \`\`\`shell
+          docker pull $IMAGE@$DIGEST
+          gh attestation verify oci://$IMAGE:$GITHUB_SHA --owner fabriciolelis
+          gh attestation verify oci://$IMAGE:$GITHUB_SHA --owner fabriciolelis --predicate-type https://cyclonedx.org/bom
+          \`\`\`
+          EOF
+
   sast:
     name: Static analysis
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload Semgrep results to code scanning
+    outputs:
+      errors: ${{ steps.findings.outputs.errors }}
+      warnings: ${{ steps.findings.outputs.warnings }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -174,7 +260,90 @@ jobs:
         run: python -m pip install semgrep==1.181.0
 
       - name: Report all findings
-        run: semgrep scan --config p/python --config p/secrets --metrics off
+        run: semgrep scan --config p/python --config p/secrets --metrics off --sarif-output=semgrep.sarif
+
+      - name: Count findings
+        id: findings
+        if: ${{ !cancelled() }}
+        run: |
+          # A result's level falls back to its rule's default level when absent.
+          levels='(.runs[0].tool.driver.rules | map({(.id): .defaultConfiguration.level}) | add) as $rules
+            | [.runs[0].results[] | (.level // $rules[.ruleId])]'
+          echo "errors=$(jq "$levels | map(select(. == \"error\")) | length" semgrep.sarif)" >> "$GITHUB_OUTPUT"
+          echo "warnings=$(jq "$levels | map(select(. != \"error\")) | length" semgrep.sarif)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload findings to code scanning
+        if: ${{ !cancelled() }}
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
 
       - name: Fail on ERROR findings
         run: semgrep scan --config p/python --config p/secrets --metrics off --severity ERROR --error --quiet
+
+  summary:
+    name: CI summary
+    # Renders one table with every job's result, also when a job failed.
+    needs: [test, image, sast, publish]
+    if: ${{ always() }}
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Render summary
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          TEST_PASSED: ${{ needs.test.outputs.passed }}
+          TEST_FAILED: ${{ needs.test.outputs.failed }}
+          TEST_SKIPPED: ${{ needs.test.outputs.skipped }}
+          IMAGE_RESULT: ${{ needs.image.result }}
+          IMAGE_VULNERABILITIES: ${{ needs.image.outputs.vulnerabilities }}
+          IMAGE_ACCEPTED: ${{ needs.image.outputs.accepted }}
+          IMAGE_PACKAGES: ${{ needs.image.outputs.packages }}
+          SAST_RESULT: ${{ needs.sast.result }}
+          SAST_ERRORS: ${{ needs.sast.outputs.errors }}
+          SAST_WARNINGS: ${{ needs.sast.outputs.warnings }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+          PUBLISH_DIGEST: ${{ needs.publish.outputs.digest }}
+          IS_MAIN_PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: |
+          status() {
+            case "$1" in
+              success) echo "✅ Passed" ;;
+              failure) echo "❌ Failed" ;;
+              skipped) echo "⏭️ Skipped" ;;
+              cancelled) echo "🚫 Cancelled" ;;
+              *) echo "❔ $1" ;;
+            esac
+          }
+          or_dash() { [ -n "$1" ] && echo "$1" || echo "—"; }
+
+          if [ -n "$TEST_PASSED" ]; then
+            tests="$TEST_PASSED passed, $TEST_FAILED failed, $TEST_SKIPPED skipped"
+          fi
+          if [ -n "$IMAGE_VULNERABILITIES" ]; then
+            scan="$IMAGE_VULNERABILITIES HIGH/CRITICAL, $IMAGE_ACCEPTED accepted"
+            [ -n "$IMAGE_PACKAGES" ] && scan="$scan, $IMAGE_PACKAGES packages in the SBOM"
+          fi
+          if [ -n "$SAST_ERRORS" ]; then
+            sast="$SAST_ERRORS errors, $SAST_WARNINGS warnings (details in code scanning)"
+          fi
+          if [ "$PUBLISH_RESULT" = success ]; then
+            publish="\`$PUBLISH_DIGEST\`"
+          elif [ "$IS_MAIN_PUSH" != true ]; then
+            publish="Only pushes to main publish"
+          elif [ "$PUBLISH_RESULT" = skipped ]; then
+            publish="Not published: an earlier check failed"
+          fi
+
+          {
+            echo "## CI summary"
+            echo ""
+            echo "| Check | Status | Result |"
+            echo "| --- | --- | --- |"
+            echo "| 🧪 Test and lint | $(status "$TEST_RESULT") | $(or_dash "$tests") |"
+            echo "| 🐳 Build and scan image | $(status "$IMAGE_RESULT") | $(or_dash "$scan") |"
+            echo "| 🛡️ Static analysis | $(status "$SAST_RESULT") | $(or_dash "$sast") |"
+            echo "| 📦 Publish image | $(status "$PUBLISH_RESULT") | $(or_dash "$publish") |"
+          } >> "$GITHUB_STEP_SUMMARY"
