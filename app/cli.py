@@ -5,7 +5,7 @@ import sys
 
 import httpx
 
-from app.database import SessionLocal, create_schema
+from app.database import SchemaNotReadyError, SessionLocal, ensure_schema_ready
 from app.importer import Importer, StandingsNotUpdatedError
 from app.jolpica import JolpicaClient, UpstreamDataError
 
@@ -76,13 +76,18 @@ def main(argv: list[str] | None = None) -> None:
     import stops at the first season that fails and exits with code 1 and the
     reason, so a scheduled run is reported as failed (ADR-006). Seasons
     imported before the failure are kept; imports are idempotent, so a rerun
-    can start from the failed season.
+    can start from the failed season. Nothing is imported unless the database
+    schema is migrated (ADR-007).
 
     Args:
         argv: Arguments without the program name; defaults to `sys.argv[1:]`.
     """
     seasons = parse_seasons(argv)
-    create_schema()
+    try:
+        ensure_schema_ready()
+    except SchemaNotReadyError as error:
+        print(f"Import not started: {error}", file=sys.stderr)
+        sys.exit(1)
     client = JolpicaClient()
     for season in seasons:
         with SessionLocal() as session:

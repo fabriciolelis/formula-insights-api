@@ -56,6 +56,7 @@ documented read endpoints.
 docker compose up -d postgres
 Copy-Item .env.example .env
 uv sync --extra dev
+uv run alembic upgrade head
 uv run python -m app.cli 2024
 uv run uvicorn app.main:app --reload
 ```
@@ -79,6 +80,44 @@ than an hour by design. The import stops at the first season that fails and
 exits with code 1 and a one-line reason, for example
 `Import of season 2023 failed: Jolpica rate limit exceeded (HTTP 429), retry after 60 s`.
 The client never retries; rerun from the failed season.
+
+### Database migrations
+
+The schema is managed with [Alembic](https://alembic.sqlalchemy.org/)
+migrations in `migrations/` (ADR-007). Apply them before starting the API or
+importing:
+
+```powershell
+uv run alembic upgrade head
+```
+
+The API and the importer never create or change tables. They refuse to run
+when the database has no migrations applied or is older than the code, and
+print the command to run. A database newer than the code is accepted, so the
+previous release keeps working after a rollback.
+
+**Existing local databases.** A database created before migrations were
+adopted has the tables but no migration history. Recreate it and import again:
+
+```powershell
+docker compose down --volumes
+docker compose up -d postgres
+uv run alembic upgrade head
+uv run python -m app.cli 2024
+```
+
+**Adding a migration.** Change the models, then generate a migration and
+review it before committing; autogenerate misses some changes, such as renames:
+
+```powershell
+uv run alembic revision --autogenerate -m "add fastest lap to race results"
+```
+
+Each migration must keep working with the release that is currently running
+(expand, then contract): add tables and nullable columns first, and drop or
+rename a column only in a later release, once no code uses it. Fix a faulty
+migration with a new one; downgrades are not relied on. CI fails when the
+models change without a migration (`alembic check`).
 
 Dependencies are locked in `uv.lock`; install [uv](https://docs.astral.sh/uv/) first.
 After changing dependencies in `pyproject.toml`, run `uv lock` and commit the

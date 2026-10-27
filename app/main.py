@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal, create_schema
+from app.database import SessionLocal, ensure_schema_ready
 from app.models import (
     Constructor,
     ConstructorStanding,
@@ -19,8 +19,8 @@ from app.models import (
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Create missing tables when the application starts."""
-    create_schema()
+    """Refuse to start unless the database schema is migrated (ADR-007)."""
+    ensure_schema_ready()
     yield
 
 
