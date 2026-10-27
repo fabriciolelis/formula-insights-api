@@ -16,6 +16,9 @@ LABEL org.opencontainers.image.source="https://github.com/fabriciolelis/formula-
 WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
 COPY app ./app
+# Migrations ship in the image; a separate step runs `alembic upgrade head` (ADR-007).
+COPY alembic.ini ./
+COPY migrations ./migrations
 ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000

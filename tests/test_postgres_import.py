@@ -8,8 +8,9 @@ from sqlalchemy import create_engine, func, select, text
 from app import database
 from app.importer import Importer
 from app.main import app
-from app.models import Base, Race, RaceResult
+from app.models import Race, RaceResult
 from tests.fixtures.jolpica.client import FixtureJolpicaClient
+from tests.migrations import upgrade
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 # GitHub Actions sets CI=true: there the test must run, so a missing URL fails instead of skipping.
@@ -33,7 +34,7 @@ def postgres_engine(bind_database):
     with admin.begin() as connection:
         connection.execute(text(f'CREATE SCHEMA "{schema}"'))
     engine = create_engine(TEST_DATABASE_URL, connect_args={"options": f"-csearch_path={schema}"})
-    Base.metadata.create_all(engine)
+    upgrade(engine)  # the schema comes from the migrations, as in a real deployment
     bind_database(engine)
     try:
         yield engine
