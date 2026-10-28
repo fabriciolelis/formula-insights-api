@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, select, update
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
@@ -65,3 +65,16 @@ def test_a_driver_can_have_two_results_in_one_race():
     assert importer.import_season(1956)["results"] == 0
     stored = session.scalars(select(RaceResult).order_by(RaceResult.position)).all()
     assert [(result.number, result.position_text) for result in stored] == [("34", "1"), ("30", "R")]
+
+
+def test_results_imported_before_car_numbers_are_claimed_not_duplicated():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    importer = Importer(session, FakeJolpica())
+    importer.import_season(2024)
+    session.execute(update(RaceResult).values(number=None))  # as left by migration 0002
+    session.commit()
+
+    assert importer.import_season(2024)["results"] == 0
+    assert session.scalars(select(RaceResult.number)).all() == ["1"]
