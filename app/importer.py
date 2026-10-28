@@ -3,7 +3,7 @@
 from datetime import date
 
 import httpx
-from sqlalchemy import delete, exists, select
+from sqlalchemy import delete, exists, or_, select
 from sqlalchemy.orm import Session
 
 from app.jolpica import JolpicaClient, UpstreamDataError
@@ -130,11 +130,18 @@ class Importer:
     def _upsert_result(self, race: Race, payload: dict) -> int:
         driver = self._driver(payload["Driver"])
         constructor = self._constructor(payload["Constructor"])
+        number = payload["number"]
         result = self.session.scalar(
-            select(RaceResult).where(RaceResult.race_id == race.id, RaceResult.driver_id == driver.id)
+            select(RaceResult).where(
+                RaceResult.race_id == race.id,
+                RaceResult.driver_id == driver.id,
+                # Rows imported before car numbers were stored have none; claim them.
+                or_(RaceResult.number == number, RaceResult.number.is_(None)),
+            )
         )
         created = int(result is None)
         result = result or RaceResult(race_id=race.id, driver_id=driver.id, constructor_id=constructor.id)
+        result.number = number
         result.constructor_id = constructor.id
         result.position = int(payload["position"]) if payload["position"].isdigit() else None
         result.position_text = payload["positionText"]

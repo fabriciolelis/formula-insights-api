@@ -3,7 +3,6 @@ import logging
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
-from alembic.script import ScriptDirectory
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
@@ -46,12 +45,10 @@ def test_database_without_migrations_is_not_ready(empty_engine):
         ensure_schema_ready(empty_engine)
 
 
-def test_database_behind_this_version_is_not_ready(empty_engine, monkeypatch):
-    upgrade(empty_engine)
-    # Simulate a newer release of the code whose latest migration is not applied yet.
-    monkeypatch.setattr(ScriptDirectory, "get_current_head", lambda self: "0002")
+def test_database_behind_this_version_is_not_ready(empty_engine):
+    upgrade(empty_engine, "0001")
 
-    with pytest.raises(SchemaNotReadyError, match="at migration 0001; this version needs 0002"):
+    with pytest.raises(SchemaNotReadyError, match="at migration 0001; this version needs "):
         ensure_schema_ready(empty_engine)
 
 
@@ -64,7 +61,7 @@ def test_database_newer_than_this_version_is_accepted(empty_engine, caplog):
     with caplog.at_level(logging.WARNING, logger="app.database"):
         ensure_schema_ready(empty_engine)
 
-    assert "newer than this version's 0001" in caplog.text
+    assert "from_a_newer_release, which is newer than this version's" in caplog.text
 
 
 def test_api_refuses_to_start_on_an_unmigrated_database(empty_engine):

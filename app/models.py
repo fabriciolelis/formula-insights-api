@@ -68,12 +68,16 @@ class Constructor(Base):
 
 
 class RaceResult(Base):
-    """One driver's Grand Prix result; a driver has at most one result per race.
+    """One driver's Grand Prix result in one car.
+
+    In early seasons a driver could race two cars in the same Grand Prix, so a
+    result is identified by race, driver, and car number.
 
     Attributes:
         id: Surrogate primary key.
         race_id: The race this result belongs to.
         driver_id: The classified driver.
+        number: Car number, or None for rows imported before it was stored.
         constructor_id: The team the driver raced for in this race.
         position: Finishing position, or None when the driver was not
             classified (for example retired or disqualified).
@@ -84,11 +88,14 @@ class RaceResult(Base):
     """
 
     __tablename__ = "race_results"
-    __table_args__ = (UniqueConstraint("race_id", "driver_id", name="uq_result_race_driver"),)
+    __table_args__ = (
+        UniqueConstraint("race_id", "driver_id", "number", name="uq_result_race_driver_number"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     race_id: Mapped[int] = mapped_column(ForeignKey("races.id"), index=True)
     driver_id: Mapped[str] = mapped_column(ForeignKey("drivers.id"), index=True)
+    number: Mapped[str | None] = mapped_column(String(10), nullable=True)
     constructor_id: Mapped[str] = mapped_column(ForeignKey("constructors.id"))
     position: Mapped[int | None] = mapped_column(nullable=True)
     position_text: Mapped[str] = mapped_column(String(20))
