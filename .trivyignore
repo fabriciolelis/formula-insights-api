@@ -20,3 +20,9 @@ CVE-2026-16742 exp:2027-01-15
 
 # perl-base: Archive::Tar (Debian status: fix deferred)
 CVE-2026-9538 exp:2027-01-15
+
+# sqlite: libsqlite3-0 (accepted 2026-11-08). No fixed Debian package; the image
+# only talks to PostgreSQL, and SQLite is used by the tests, which are not in it.
+CVE-2026-119373 exp:2027-01-15
+CVE-2026-119374 exp:2027-01-15
+CVE-2026-119379 exp:2027-01-15
