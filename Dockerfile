@@ -13,6 +13,17 @@ LABEL org.opencontainers.image.source="https://github.com/fabriciolelis/formula-
       org.opencontainers.image.description="Formula Insights API and season importer" \
       org.opencontainers.image.licenses="Apache-2.0"
 
+# shortcut: patches zlib (CVE-2026-85091, CVE-2026-76844) ahead of the base image;
+# remove once python:3.12-slim ships zlib1g 1:1.3.dfsg+really1.3.1-1+deb13u1 or newer.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade zlib1g \
+    && rm -rf /var/lib/apt/lists/*
+
+# Least privilege: the API, the importer, and migrations never run as root.
+# Kubernetes sets the same numeric UID and GID with runAsNonRoot.
+RUN groupadd --system --gid 10001 app \
+    && useradd --system --uid 10001 --gid app app
+
 WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
 COPY app ./app
@@ -21,16 +32,7 @@ COPY alembic.ini ./
 COPY migrations ./migrations
 ENV PATH="/app/.venv/bin:$PATH"
 
-# shortcut: patches zlib (CVE-2026-85091, CVE-2026-76844) ahead of the base image;
-# remove once python:3.12-slim ships zlib1g 1:1.3.dfsg+really1.3.1-1+deb13u1 or newer.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends --only-upgrade zlib1g \
-    && rm -rf /var/lib/apt/lists/*
-
-# Least privilege: the API, the importer, and migrations never run as root.
-# Kubernetes sets the same numeric UID with runAsNonRoot.
-RUN useradd --system --uid 10001 app
-USER 10001
+USER 10001:10001
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
