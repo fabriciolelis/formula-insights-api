@@ -21,6 +21,12 @@ COPY alembic.ini ./
 COPY migrations ./migrations
 ENV PATH="/app/.venv/bin:$PATH"
 
+# shortcut: patches zlib (CVE-2026-85091, CVE-2026-76844) ahead of the base image;
+# remove once python:3.12-slim ships zlib1g 1:1.3.dfsg+really1.3.1-1+deb13u1 or newer.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade zlib1g \
+    && rm -rf /var/lib/apt/lists/*
+
 # Least privilege: the API, the importer, and migrations never run as root.
 # Kubernetes sets the same numeric UID with runAsNonRoot.
 RUN useradd --system --uid 10001 app
