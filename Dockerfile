@@ -21,5 +21,10 @@ COPY alembic.ini ./
 COPY migrations ./migrations
 ENV PATH="/app/.venv/bin:$PATH"
 
+# Least privilege: the API, the importer, and migrations never run as root.
+# Kubernetes sets the same numeric UID with runAsNonRoot.
+RUN useradd --system --uid 10001 app
+USER 10001
+
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
