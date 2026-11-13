@@ -54,12 +54,24 @@ documented read endpoints.
 
 ```powershell
 docker compose up -d postgres
-Copy-Item .env.example .env
 uv sync --extra dev
 uv run alembic upgrade head
 uv run python -m app.cli 2024
 uv run uvicorn app.main:app --reload
 ```
+
+No configuration file is needed: the defaults match the Compose database. The
+API, the importer, and Alembic read two environment variables, and nothing
+reads a `.env` file:
+
+| Variable | Default |
+| --- | --- |
+| `DATABASE_URL` | `postgresql+psycopg://formula_insights:formula_insights@localhost:5432/formula_insights` |
+| `JOLPICA_BASE_URL` | `https://api.jolpi.ca/ergast/f1` |
+
+To use another database, set the variable in the shell before running the
+commands, for example `$env:DATABASE_URL = "postgresql+psycopg://..."` in
+PowerShell.
 
 The API is then available at `http://localhost:8000`; interactive endpoint
 documentation is at `/docs`. Re-running `uv run python -m app.cli 2024` is safe: the
