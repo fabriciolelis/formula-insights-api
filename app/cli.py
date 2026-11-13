@@ -1,7 +1,8 @@
-"""Command-line entry point for importing seasons: `python -m app.cli <first> [<last>]`."""
+"""Command-line entry point for importing seasons: `python -m app.cli <first> [<last>]` or `current`."""
 
 import argparse
 import sys
+from datetime import UTC, date, datetime
 
 import httpx
 
@@ -48,11 +49,40 @@ def upstream_reason(error: httpx.HTTPError | UpstreamDataError) -> str:
     return f"request to Jolpica failed: {type(error).__name__}: {error}"
 
 
-def parse_seasons(argv: list[str] | None = None) -> range:
+CURRENT = "current"
+
+
+def season_argument(value: str) -> int | str:
+    """Accept a season year or the word `current`.
+
+    Args:
+        value: The command-line value.
+
+    Returns:
+        The year as an integer, or `CURRENT`.
+
+    Raises:
+        argparse.ArgumentTypeError: If the value is neither.
+    """
+    if value == CURRENT:
+        return CURRENT
+    try:
+        return int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"expected a season year or '{CURRENT}', got '{value}'"
+        ) from None
+
+
+def parse_seasons(argv: list[str] | None = None, today: date | None = None) -> range:
     """Read the season or inclusive season range from the command line.
+
+    `current` stands for the season of the current calendar year in UTC, so a
+    scheduled daily import needs no yearly change.
 
     Args:
         argv: Arguments without the program name; defaults to `sys.argv[1:]`.
+        today: The date that `current` resolves against; defaults to today in UTC.
 
     Returns:
         The seasons to import, in ascending order.
@@ -60,9 +90,18 @@ def parse_seasons(argv: list[str] | None = None) -> range:
     parser = argparse.ArgumentParser(
         description="Import Formula 1 seasons from Jolpica, paced as ADR-006 requires."
     )
-    parser.add_argument("first", type=int, help="season to import, or first season of a range")
+    parser.add_argument(
+        "first",
+        type=season_argument,
+        help=f"season to import, first season of a range, or '{CURRENT}' for this UTC year",
+    )
     parser.add_argument("last", type=int, nargs="?", help="last season of the range (inclusive)")
     args = parser.parse_args(argv)
+    if args.first == CURRENT:
+        if args.last is not None:
+            parser.error(f"'{CURRENT}' imports one season and takes no last season")
+        season = (today or datetime.now(UTC).date()).year
+        return range(season, season + 1)
     last = args.first if args.last is None else args.last
     if last < args.first:
         parser.error("last season must not be before the first season")

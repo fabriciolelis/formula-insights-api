@@ -1,3 +1,4 @@
+from datetime import date
 from typing import ClassVar
 
 import httpx
@@ -101,3 +102,33 @@ def test_range_must_be_ascending(capsys):
 )
 def test_upstream_reason(error, reason):
     assert cli.upstream_reason(error) == reason
+
+
+@pytest.mark.parametrize(
+    ("today", "season"),
+    [
+        (date(2026, 11, 13), 2026),
+        (date(2026, 12, 31), 2026),
+        (date(2027, 1, 1), 2027),
+    ],
+)
+def test_current_is_the_season_of_the_given_utc_date(today, season):
+    assert cli.parse_seasons(["current"], today=today) == range(season, season + 1)
+
+
+def test_explicit_seasons_still_work_alongside_current():
+    assert cli.parse_seasons(["1950", "1952"], today=date(2026, 11, 13)) == range(1950, 1953)
+
+
+def test_current_takes_no_last_season(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        cli.parse_seasons(["current", "2027"], today=date(2026, 11, 13))
+
+    assert exit_info.value.code == 2
+
+
+def test_unknown_word_is_rejected(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        cli.parse_seasons(["latest"], today=date(2026, 11, 13))
+
+    assert exit_info.value.code == 2
