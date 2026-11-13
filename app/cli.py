@@ -1,6 +1,7 @@
 """Command-line entry point for importing seasons: `python -m app.cli <first> [<last>]` or `current`."""
 
 import argparse
+import logging
 import sys
 from datetime import UTC, date, datetime
 
@@ -9,6 +10,11 @@ import httpx
 from app.database import SchemaNotReadyError, SessionLocal, ensure_schema_ready
 from app.importer import Importer, StandingsNotUpdatedError
 from app.jolpica import JolpicaClient, UpstreamDataError
+from app.logs import configure_logging
+
+logger = logging.getLogger(__name__)
+
+ENTITIES = ("races", "results", "driver_standings", "constructor_standings")
 
 
 def summary(season: int, counts: dict[str, int]) -> str:
@@ -121,11 +127,14 @@ def main(argv: list[str] | None = None) -> None:
     Args:
         argv: Arguments without the program name; defaults to `sys.argv[1:]`.
     """
+    configure_logging()
     seasons = parse_seasons(argv)
+    run = ImportRun(seasons)
     try:
         ensure_schema_ready()
     except SchemaNotReadyError as error:
         print(f"Import not started: {error}", file=sys.stderr)
+        run.log_summary("failure", reason=str(error))
         sys.exit(1)
     client = JolpicaClient()
     for season in seasons:
@@ -133,21 +142,68 @@ def main(argv: list[str] | None = None) -> None:
             try:
                 counts = Importer(session, client).import_season(season)
             except StandingsNotUpdatedError as error:
-                print(summary(season, error.counts))
-                fail(season, seasons, f"standings not updated: {error}")
+                run.log_season(season, error.counts)
+                fail(run, season, f"standings not updated: {error}")
             except (httpx.HTTPError, UpstreamDataError) as error:
-                fail(season, seasons, upstream_reason(error))
-        print(summary(season, counts))
+                fail(run, season, upstream_reason(error))
+        run.log_season(season, counts)
+        run.seasons_imported += 1
+    run.log_summary("success")
 
 
-def fail(season: int, seasons: range, reason: str) -> None:
-    """Report a failed season on stderr and exit with code 1.
+class ImportRun:
+    """Tracks one import for its log lines and the summary line that ends it.
+
+    The summary line, with the condition of the import's Job, is the ingestion
+    signal (platform-docs#10): every import ends with exactly one.
+    """
+
+    def __init__(self, seasons: range) -> None:
+        self.seasons = seasons
+        self.seasons_imported = 0
+        self.counts = dict.fromkeys(ENTITIES, 0)
+
+    def log_season(self, season: int, counts: dict[str, int]) -> None:
+        """Log the rows one season added and add them to the run's totals.
+
+        Args:
+            season: The season.
+            counts: New rows per entity.
+        """
+        for entity in ENTITIES:
+            self.counts[entity] += counts[entity]
+        logger.info(summary(season, counts), extra={"season": season, "counts": counts})
+
+    def log_summary(self, outcome: str, **fields: object) -> None:
+        """Log the summary line that ends the import.
+
+        Args:
+            outcome: `success` or `failure`.
+            **fields: Extra fields, such as `reason` and `failed_season`.
+        """
+        logger.info(
+            "Import summary",
+            extra={
+                "outcome": outcome,
+                "first_season": self.seasons[0],
+                "last_season": self.seasons[-1],
+                "seasons_imported": self.seasons_imported,
+                "counts": self.counts,
+                **fields,
+            },
+        )
+
+
+def fail(run: ImportRun, season: int, reason: str) -> None:
+    """Report a failed season on stderr, log the summary line, and exit with code 1.
 
     Args:
+        run: The import, which knows all its seasons, to say where a rerun should start.
         season: The season that failed.
-        seasons: All seasons of the run, to say where a rerun should start.
         reason: Why the season failed.
     """
+    seasons = run.seasons
+    run.log_summary("failure", failed_season=season, reason=reason)
     print(f"Import of season {season} failed: {reason}", file=sys.stderr)
     remaining = range(season + 1, seasons[-1] + 1)
     if remaining:

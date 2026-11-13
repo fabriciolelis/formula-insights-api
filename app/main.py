@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app import database
 from app.database import SessionLocal, ensure_schema_ready
+from app.logs import configure_logging
 from app.models import (
     Constructor,
     ConstructorStanding,
@@ -21,7 +22,13 @@ from app.models import (
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Refuse to start unless the database schema is migrated (ADR-007)."""
+    """Log as JSON, and refuse to start unless the database schema is migrated (ADR-007).
+
+    Logging is configured here rather than in the container command, so the
+    image needs no uvicorn log config; uvicorn's first startup lines, written
+    before this runs, stay plain text.
+    """
+    configure_logging()
     ensure_schema_ready()
     yield
 
