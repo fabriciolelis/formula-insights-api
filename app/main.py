@@ -3,9 +3,11 @@
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import database
 from app.database import SessionLocal, ensure_schema_ready
 from app.models import (
     Constructor,
@@ -41,6 +43,18 @@ def session_dependency():
 def health() -> dict[str, str]:
     """Liveness check: reports that the process is running, without touching the database."""
     return {"status": "ok"}
+
+
+@app.get("/ready")
+def ready() -> JSONResponse:
+    """Readiness check: 200 when the database answers, 503 within 2 s when it does not.
+
+    A failing readiness check takes the pod out of service without restarting
+    it; `/health` is the liveness check.
+    """
+    if database.is_ready():
+        return JSONResponse({"status": "ready"})
+    return JSONResponse({"status": "unavailable"}, status_code=503)
 
 
 @app.get("/seasons/{year}/races")
