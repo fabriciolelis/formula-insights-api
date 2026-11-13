@@ -12,11 +12,18 @@ The project is intentionally small. Its primary purpose is to validate platform 
 
 ```text
 GET /health
+GET /ready
 GET /seasons/{year}/races
 GET /seasons/{year}/standings/drivers
 GET /seasons/{year}/standings/constructors
 GET /seasons/{year}/races/{round}/results
 ```
+
+`/health` is the liveness check: it says the process is running and never
+touches the database. `/ready` is the readiness check: it returns
+`200 {"status": "ready"}` when the database answers `SELECT 1`, and
+`503 {"status": "unavailable"}` within 2 seconds when the database fails or
+hangs, so Kubernetes stops sending traffic to the pod without restarting it.
 
 Standings mirror the official championship tables published by Jolpica after
 the latest imported round, so they include sprint points, penalties, and
@@ -80,6 +87,31 @@ than an hour by design. The import stops at the first season that fails and
 exits with code 1 and a one-line reason, for example
 `Import of season 2023 failed: Jolpica rate limit exceeded (HTTP 429), retry after 60 s`.
 The client never retries; rerun from the failed season.
+
+To import the season of the current calendar year in UTC, as the daily import
+does, pass `current` instead of a year. It takes no last season, so the same
+scheduled command works every year:
+
+```powershell
+uv run python -m app.cli current
+```
+
+### Logs
+
+The API, uvicorn, and the importer write one JSON object per line to standard
+output, with `timestamp` (UTC), `level`, `logger`, `message`, and extra fields
+such as `season`. Uvicorn's first startup lines, written before the app starts,
+stay plain text.
+
+Every import, successful or failed, ends with exactly one summary line, which
+is the ingestion signal for alerts and the ingestion SLO (platform-docs#10):
+
+```json
+{"timestamp": "2026-11-13T06:00:41.512Z", "level": "INFO", "logger": "app.cli", "message": "Import summary", "outcome": "failure", "first_season": 2026, "last_season": 2026, "seasons_imported": 0, "counts": {"races": 0, "results": 0, "driver_standings": 0, "constructor_standings": 0}, "failed_season": 2026, "reason": "Jolpica rate limit exceeded (HTTP 429), retry after 60 s"}
+```
+
+`outcome` is `success` or `failure`; `failed_season` and `reason` appear only
+on failure. The one-line failure reasons on standard error are unchanged.
 
 ### Database migrations
 

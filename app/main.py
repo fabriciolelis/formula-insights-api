@@ -3,10 +3,13 @@
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import database
 from app.database import SessionLocal, ensure_schema_ready
+from app.logs import configure_logging
 from app.models import (
     Constructor,
     ConstructorStanding,
@@ -19,7 +22,13 @@ from app.models import (
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Refuse to start unless the database schema is migrated (ADR-007)."""
+    """Log as JSON, and refuse to start unless the database schema is migrated (ADR-007).
+
+    Logging is configured here rather than in the container command, so the
+    image needs no uvicorn log config; uvicorn's first startup lines, written
+    before this runs, stay plain text.
+    """
+    configure_logging()
     ensure_schema_ready()
     yield
 
@@ -41,6 +50,18 @@ def session_dependency():
 def health() -> dict[str, str]:
     """Liveness check: reports that the process is running, without touching the database."""
     return {"status": "ok"}
+
+
+@app.get("/ready")
+def ready() -> JSONResponse:
+    """Readiness check: 200 when the database answers, 503 within 2 s when it does not.
+
+    A failing readiness check takes the pod out of service without restarting
+    it; `/health` is the liveness check.
+    """
+    if database.is_ready():
+        return JSONResponse({"status": "ready"})
+    return JSONResponse({"status": "unavailable"}, status_code=503)
 
 
 @app.get("/seasons/{year}/races")
