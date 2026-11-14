@@ -2,13 +2,17 @@
 
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from pathlib import Path
 
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import Engine, MetaData, create_engine
+from sqlalchemy import Engine, MetaData, create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.pool import NullPool
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +52,56 @@ def database_url() -> str:
 
 engine = create_engine(database_url(), pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+# Readiness answers within this many seconds, so a probe never waits for a hung database.
+READINESS_TIMEOUT_SECONDS = 1.5
+# libpq's own limit (its minimum is 2 s), so an abandoned check still ends on its own.
+CONNECT_TIMEOUT_SECONDS = 2
+
+
+def make_readiness_engine(url: str) -> Engine:
+    """Create the engine used only by readiness checks.
+
+    Each check opens a fresh connection instead of reusing a pooled one, so a
+    connection left open to a database host that disappeared cannot hang it,
+    and opening the connection is bounded by `CONNECT_TIMEOUT_SECONDS`.
+
+    Args:
+        url: The database URL.
+
+    Returns:
+        An engine without a connection pool.
+    """
+    return create_engine(
+        url, poolclass=NullPool, connect_args={"connect_timeout": CONNECT_TIMEOUT_SECONDS}
+    )
+
+
+readiness_engine = make_readiness_engine(database_url())
+_readiness_checks = ThreadPoolExecutor(max_workers=4, thread_name_prefix="readiness")
+
+
+def _select_one(bind: Engine) -> None:
+    with bind.connect() as connection:
+        connection.execute(text("SELECT 1"))
+
+
+def is_ready() -> bool:
+    """Report whether the database answers `SELECT 1` within `READINESS_TIMEOUT_SECONDS`.
+
+    Returns:
+        True if the database answered in time, False if it failed or took too long.
+    """
+    check = _readiness_checks.submit(_select_one, readiness_engine)
+    try:
+        check.result(timeout=READINESS_TIMEOUT_SECONDS)
+    except FutureTimeout:
+        logger.warning("Readiness check timed out after %s s", READINESS_TIMEOUT_SECONDS)
+        return False
+    except SQLAlchemyError as error:
+        logger.warning("Readiness check failed: %s", error.__class__.__name__)
+        return False
+    return True
 
 
 def migration_script() -> ScriptDirectory:

@@ -1,9 +1,12 @@
+import json
+from datetime import date
 from typing import ClassVar
 
 import httpx
 import pytest
 
 from app import cli
+from app.database import SchemaNotReadyError
 from app.jolpica import UpstreamDataError
 from tests.test_importer import FakeJolpica
 
@@ -43,7 +46,11 @@ def test_single_season(jolpica, capsys):
     cli.main(["2024"])
 
     assert [client.seasons for client in jolpica.instances] == [[2024]]
-    assert capsys.readouterr().out.startswith("Imported season 2024: 1 new races")
+    [season_line] = [
+        record for record in json_lines(capsys.readouterr().out) if "season" in record
+    ]
+    assert season_line["message"].startswith("Imported season 2024: 1 new races")
+    assert season_line["season"] == 2024
 
 
 def test_range_shares_one_client_so_pacing_covers_the_whole_run(jolpica, capsys):
@@ -101,3 +108,86 @@ def test_range_must_be_ascending(capsys):
 )
 def test_upstream_reason(error, reason):
     assert cli.upstream_reason(error) == reason
+
+
+@pytest.mark.parametrize(
+    ("today", "season"),
+    [
+        (date(2026, 11, 13), 2026),
+        (date(2026, 12, 31), 2026),
+        (date(2027, 1, 1), 2027),
+    ],
+)
+def test_current_is_the_season_of_the_given_utc_date(today, season):
+    assert cli.parse_seasons(["current"], today=today) == range(season, season + 1)
+
+
+def test_explicit_seasons_still_work_alongside_current():
+    assert cli.parse_seasons(["1950", "1952"], today=date(2026, 11, 13)) == range(1950, 1953)
+
+
+def test_current_takes_no_last_season(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        cli.parse_seasons(["current", "2027"], today=date(2026, 11, 13))
+
+    assert exit_info.value.code == 2
+
+
+def test_unknown_word_is_rejected(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        cli.parse_seasons(["latest"], today=date(2026, 11, 13))
+
+    assert exit_info.value.code == 2
+
+
+def json_lines(text: str) -> list[dict]:
+    return [json.loads(line) for line in text.splitlines()]
+
+
+def test_successful_import_ends_with_one_summary_line(jolpica, capsys):
+    cli.main(["2023", "2024"])
+
+    records = json_lines(capsys.readouterr().out)
+    summaries = [record for record in records if record["message"] == "Import summary"]
+    assert summaries == [records[-1]]
+    assert records[-1]["outcome"] == "success"
+    assert records[-1]["first_season"] == 2023
+    assert records[-1]["last_season"] == 2024
+    assert records[-1]["seasons_imported"] == 2
+    assert records[-1]["counts"]["races"] == 2
+    assert "reason" not in records[-1]
+
+
+def test_failed_import_ends_with_one_summary_line_carrying_the_reason(jolpica, capsys):
+    jolpica.failures = {2024: http_error(503)}
+
+    with pytest.raises(SystemExit):
+        cli.main(["2023", "2025"])
+
+    output = capsys.readouterr()
+    records = json_lines(output.out)
+    assert [record["message"] for record in records].count("Import summary") == 1
+    summary = records[-1]
+    assert summary["outcome"] == "failure"
+    assert summary["failed_season"] == 2024
+    assert summary["seasons_imported"] == 1
+    assert summary["reason"] == (
+        "Jolpica returned HTTP 503 for https://example.test/2023/races.json"
+    )
+    assert output.err.startswith("Import of season 2024 failed:")
+
+
+def test_import_on_an_unmigrated_database_still_ends_with_a_summary(jolpica, capsys, monkeypatch):
+    def not_ready():
+        raise SchemaNotReadyError("the database has no migrations applied")
+
+    monkeypatch.setattr(cli, "ensure_schema_ready", not_ready)
+
+    with pytest.raises(SystemExit):
+        cli.main(["2024"])
+
+    summary = json_lines(capsys.readouterr().out)[-1]
+    assert summary["message"] == "Import summary"
+    assert summary["outcome"] == "failure"
+    assert summary["seasons_imported"] == 0
+    assert summary["reason"] == "the database has no migrations applied"

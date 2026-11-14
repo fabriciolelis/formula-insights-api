@@ -11,14 +11,17 @@ from tests.migrations import stamp
 def bind_database():
     """Point the app's engine and session factory at a test engine, then restore them."""
     original_engine = database.engine
+    original_readiness_engine = database.readiness_engine
     original_bind = database.SessionLocal.kw.get("bind")
 
     def bind(engine) -> None:
         database.engine = engine
+        database.readiness_engine = engine
         database.SessionLocal.configure(bind=engine)
 
     yield bind
     database.engine = original_engine
+    database.readiness_engine = original_readiness_engine
     database.SessionLocal.configure(bind=original_bind)
 
 
