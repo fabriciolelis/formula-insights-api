@@ -13,6 +13,7 @@ The project is intentionally small. Its primary purpose is to validate platform 
 ```text
 GET /health
 GET /ready
+GET /metrics
 GET /seasons/{year}/races
 GET /seasons/{year}/standings/drivers
 GET /seasons/{year}/standings/constructors
@@ -124,6 +125,24 @@ is the ingestion signal for alerts and the ingestion SLO (platform-docs#10):
 
 `outcome` is `success` or `failure`; `failed_season` and `reason` appear only
 on failure. The one-line failure reasons on standard error are unchanged.
+
+### Metrics
+
+`GET /metrics` serves the request metrics in the Prometheus text format, for
+the API's SLOs (ADR-009). OpenTelemetry measures every request except
+`/health`, `/ready`, and `/metrics`, following its HTTP semantic conventions:
+`http_server_request_duration_seconds` is a histogram labelled by route
+template (`http_route="/seasons/{year}/races"`, never the raw path), method,
+and status code; its `_count` counts requests, and its buckets include 0.5 s,
+the latency SLO's threshold.
+
+```bash
+curl -s localhost:8000/metrics | grep http_server_request_duration_seconds_count
+```
+
+`/metrics` is served on the API's port and is meant for Prometheus only.
+Before the API is exposed through an Ingress or any public endpoint, block
+`/metrics` there or move it to a separate port.
 
 ### Database migrations
 

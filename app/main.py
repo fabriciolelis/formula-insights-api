@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app import database
 from app.database import SessionLocal, ensure_schema_ready
 from app.logs import configure_logging
+from app.metrics import instrument
 from app.models import (
     Constructor,
     ConstructorStanding,
@@ -34,6 +35,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Formula Insights API", version="0.1.0", lifespan=lifespan)
+instrument(app)
 
 
 def session_dependency():

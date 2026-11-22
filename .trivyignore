@@ -26,3 +26,9 @@ CVE-2026-9538 exp:2027-01-15
 CVE-2026-119373 exp:2027-01-15
 CVE-2026-119374 exp:2027-01-15
 CVE-2026-119379 exp:2027-01-15
+
+# openssl: libssl3t64, openssl, openssl-provider-legacy (accepted 2026-11-22).
+# No fixed Debian package; the flaw is in QUIC stream handling, and the API
+# uses no QUIC: uvicorn serves plain HTTP/1.1 in the cluster, and PostgreSQL
+# connections use TLS over TCP.
+CVE-2026-124709 exp:2027-01-15
