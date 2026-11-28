@@ -304,10 +304,12 @@ def b_season(year: int) -> str:
 def podium(res: list[dict], car_width: int = 150) -> str:
     def step(i: int, cls: str) -> str:
         x = res[i]
+        big = i == 0 and car_width > 100
+        size, font = (44, 26) if big else (34, 20) if car_width > 100 else (22, 15)
         return (f"<div class='card {cls}'><div class='pos'>P{i + 1}</div>"
-                f"{car(colour(x['constructor']['id']), car_width)}"
-                f"<b>{who(x['driver'], x['constructor'])}</b><br>"
-                f"{e(x['constructor']['name'])}</div>")
+                f"<div style='font-size:{font}px;font-weight:700;margin:10px 0 4px'>"
+                f"{who(x['driver'], x['constructor'], size)}</div>"
+                f"<div style='color:#889'>{e(x['constructor']['name'])}</div></div>")
     return f"<div class='podium'>{step(1, '')}{step(0, 'p1')}{step(2, '')}</div>"
 
 
