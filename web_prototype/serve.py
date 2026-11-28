@@ -213,6 +213,56 @@ footer{color:#667;font-size:12px;margin-top:32px}footer a{text-decoration:underl
 """
 
 
+# PLACEHOLDER art: generic helmet and car shapes painted in the team colour. Not the
+# drivers' real helmet designs nor the teams' real cars (see the image-source question).
+TEAM_COLOURS = {  # 2024 only; a real site would need a curated table back to 1950
+    "red_bull": "#3671C6", "mclaren": "#FF8000", "ferrari": "#E8002D", "mercedes": "#27F4D2",
+    "aston_martin": "#229971", "alpine": "#0093CC", "williams": "#64C4FF", "rb": "#6692FF",
+    "haas": "#B6BABD", "sauber": "#52E252",
+}
+
+
+def colour(constructor_id: str) -> str:
+    return TEAM_COLOURS.get(constructor_id, "#888")
+
+
+def helmet(c: str, size: int = 22) -> str:
+    return (f"<svg width='{size}' height='{size}' viewBox='0 0 32 32' style='vertical-align:"
+            f"middle;flex:none'><path d='M4 20a12 12 0 0 1 24-4v6H14l-2 4H6a2 2 0 0 1-2-2z' "
+            f"fill='{c}'/><path d='M15 14h12v5H15z' fill='#111' opacity='.75'/>"
+            f"<path d='M6 22h22' stroke='#fff' stroke-width='1.5' opacity='.6'/></svg>")
+
+
+def car(c: str, width: int = 160) -> str:
+    return (f"<svg width='{width}' viewBox='0 0 200 50' style='display:block;margin:8px auto'>"
+            f"<path d='M8 34h22l10-10h40l8-8h22l6 8h40l20 6 16 2v6H8z' fill='{c}'/>"
+            f"<path d='M96 16h18l4 8H92z' fill='#111'/><rect x='2' y='22' width='10' "
+            f"height='14' fill='{c}'/><rect x='186' y='30' width='12' height='8' fill='{c}'/>"
+            f"<circle cx='40' cy='40' r='9' fill='#111'/><circle cx='158' cy='40' r='9' "
+            f"fill='#111'/></svg>")
+
+
+def team_of_driver() -> dict[str, dict]:
+    # The API's driver standings carry no constructor; the prototype takes each driver's
+    # team from their last race result.
+    teams: dict[str, dict] = {}
+    for rnd in sorted(D["results"]):
+        for x in D["results"][rnd]:
+            teams[x["driver"]["id"]] = x["constructor"]
+    return teams
+
+
+def who(driver: dict, constructor: dict, size: int = 22) -> str:
+    return (f"<span style='display:inline-flex;gap:8px;align-items:center'>"
+            f"{helmet(colour(constructor['id']), size)}{driver_name(driver)}</span>")
+
+
+def stripe(constructor: dict) -> str:
+    return (f"<span style='display:inline-block;width:4px;height:14px;margin-right:8px;"
+            f"vertical-align:middle;background:{colour(constructor['id'])}'></span>"
+            f"{e(constructor['name'])}")
+
+
 def b_shell(year: int, active: str, body: str) -> str:
     opts = "".join(f"<option value='/seasons/{y}' {'selected' if y == year else ''}>{y}</option>"
                    for y in reversed(YEARS))
@@ -220,7 +270,8 @@ def b_shell(year: int, active: str, body: str) -> str:
         f"<a class='{'on' if active == str(r['round']) else ''}' href='/seasons/{year}/races/"
         f"{r['round']}'><small>{r['round']}</small>{e(r['name'].replace(' Grand Prix', ''))}</a>"
         for r in D["races"]) if year == SEASON else ""
-    nav = (f"<a class='{'on' if active == 'season' else ''}' href='/seasons/{year}'>"
+    nav = (f"<a class='{'on' if active == 'home' else ''}' href='/'><small>⌂</small>Home</a>"
+           f"<a class='{'on' if active == 'season' else ''}' href='/seasons/{year}'>"
            f"<small>★</small>Championship</a><div class='sec'>Races</div>{rounds}")
     return (f"<style>{CSS_B}</style><aside><div class='brand'>FORMULA INSIGHTS</div>"
             "<select onchange='location=this.value+location.search'>"
@@ -230,17 +281,18 @@ def b_shell(year: int, active: str, body: str) -> str:
 def b_season(year: int) -> str:
     if year != SEASON:
         return b_shell(year, "season", f"<h1>{year}</h1>{no_data(year)}")
+    teams = team_of_driver()
     d1, d2 = D["drivers"][0], D["drivers"][1]
     c1 = D["constructors"][0]
     hero = (f"<div class='hero'><div class='card'><div class='k'>Drivers' champion</div><div "
-            f"class='v'>{driver_name(d1)}</div>{d1['points']:g} pts · {d1['wins']} wins</div>"
-            f"<div class='card'><div class='k'>Margin to P2</div><div class='v'>"
-            f"{d1['points'] - d2['points']:g} pts</div>over {driver_name(d2)}</div><div "
-            f"class='card'><div class='k'>Constructors' champion</div><div class='v'>"
-            f"{e(c1['name'])}</div>{c1['points']:g} pts</div></div>")
-    drv = "".join(f"<tr><td>{e(s['position_text'])}</td><td>{driver_name(s)}</td><td class='n'>"
-                  f"{s['points']:g}</td></tr>" for s in D["drivers"])
-    con = "".join(f"<tr><td>{e(s['position_text'])}</td><td>{e(s['name'])}</td><td class='n'>"
+            f"class='v'>{who(d1, teams[d1['id']], 30)}</div>{d1['points']:g} pts · "
+            f"{d1['wins']} wins</div><div class='card'><div class='k'>Margin to P2</div><div "
+            f"class='v'>{d1['points'] - d2['points']:g} pts</div>over {driver_name(d2)}</div>"
+            f"<div class='card'><div class='k'>Constructors' champion</div><div class='v'>"
+            f"{e(c1['name'])}</div>{car(colour(c1['id']), 140)}{c1['points']:g} pts</div></div>")
+    drv = "".join(f"<tr><td>{e(s['position_text'])}</td><td>{who(s, teams[s['id']])}</td>"
+                  f"<td class='n'>{s['points']:g}</td></tr>" for s in D["drivers"])
+    con = "".join(f"<tr><td>{e(s['position_text'])}</td><td>{stripe(s)}</td><td class='n'>"
                   f"{s['points']:g}</td></tr>" for s in D["constructors"])
     body = (f"<h1>{year} championship</h1>{hero}<div class='cols'><div class='card'><table>"
             f"<tr><th>#</th><th>Driver</th><th>Pts</th></tr>{drv}</table></div><div "
@@ -249,23 +301,87 @@ def b_season(year: int) -> str:
     return b_shell(year, "season", body)
 
 
-def b_race(year: int, rnd: int) -> str:
-    r, res = race(rnd), D["results"][rnd]
-
+def podium(res: list[dict], car_width: int = 150) -> str:
     def step(i: int, cls: str) -> str:
         x = res[i]
-        return (f"<div class='card {cls}'><div class='pos'>P{i + 1}</div><b>"
-                f"{driver_name(x['driver'])}</b><br>{e(x['constructor']['name'])}</div>")
+        return (f"<div class='card {cls}'><div class='pos'>P{i + 1}</div>"
+                f"{car(colour(x['constructor']['id']), car_width)}"
+                f"<b>{who(x['driver'], x['constructor'])}</b><br>"
+                f"{e(x['constructor']['name'])}</div>")
+    return f"<div class='podium'>{step(1, '')}{step(0, 'p1')}{step(2, '')}</div>"
 
-    podium = f"<div class='podium'>{step(1, '')}{step(0, 'p1')}{step(2, '')}</div>"
-    rows = "".join(f"<tr><td>{e(x['position_text'])}</td><td>{driver_name(x['driver'])}</td>"
-                   f"<td>{e(x['constructor']['name'])}</td><td>{e(x['status'])}</td>"
-                   f"<td class='n'>{x['points']:g}</td></tr>" for x in res)
+
+def b_race(year: int, rnd: int) -> str:
+    r, res = race(rnd), D["results"][rnd]
+    rows = "".join(f"<tr><td>{e(x['position_text'])}</td><td>"
+                   f"{who(x['driver'], x['constructor'])}</td><td>{stripe(x['constructor'])}"
+                   f"</td><td>{e(x['status'])}</td><td class='n'>{x['points']:g}</td></tr>"
+                   for x in res)
     body = (f"<h1>{e(r['name'])}</h1><p style='color:#889'>Round {rnd} · {r['date']} · "
-            f"{e(r['circuit']['name'])}</p>{podium}<div class='card'><table><tr><th>Pos</th>"
-            f"<th>Driver</th><th>Constructor</th><th>Status</th><th>Pts</th></tr>{rows}</table>"
-            "</div>")
+            f"{e(r['circuit']['name'])}</p>{podium(res)}<div class='card'><table><tr><th>Pos"
+            f"</th><th>Driver</th><th>Constructor</th><th>Status</th><th>Pts</th></tr>{rows}"
+            "</table></div>")
     return b_shell(year, str(rnd), body)
+
+
+# --- Home options inside variant B ---------------------------------------------------------
+
+def last_race() -> dict:
+    return [r for r in D["races"] if D["results"].get(r["round"])][-1]
+
+
+def top5_table() -> str:
+    teams = team_of_driver()
+    rows = "".join(f"<tr><td>{s['position_text']}</td><td>{who(s, teams[s['id']])}</td>"
+                   f"<td class='n'>{s['points']:g}</td></tr>" for s in D["drivers"][:5])
+    return (f"<div class='card'><div class='k'>Championship</div><table>{rows}</table>"
+            f"<a href='/seasons/{SEASON}' style='color:#ff4d4d'>Full standings →</a></div>")
+
+
+def b_home_latest() -> str:
+    r = last_race()
+    body = (f"<div style='color:#889;text-transform:uppercase;font-size:12px'>Latest race · "
+            f"Round {r['round']} · {r['date']}</div><h1 style='margin-top:4px'>"
+            f"<a href='/seasons/{SEASON}/races/{r['round']}'>{e(r['name'])}</a></h1>"
+            f"{podium(D['results'][r['round']], 170)}<div class='cols'>{top5_table()}"
+            f"<div class='card'><div class='k'>Browse</div><p>Every season from 1950 to "
+            f"{SEASON}: races, results and standings, updated daily.</p><p><a href='/seasons/"
+            f"{SEASON}' style='color:#ff4d4d'>{SEASON} season →</a></p></div></div>")
+    return b_shell(SEASON, "home", body)
+
+
+def b_home_grid() -> str:
+    tiles = ""
+    for r in D["races"]:
+        w = winner(r["round"])
+        c = colour(w["constructor"]["id"]) if w else "#333"
+        inner = (f"{helmet(c, 34)}<b>{e(w['driver']['family_name'])}</b>" if w
+                 else "<span style='color:#667'>Not run yet</span>")
+        tiles += (f"<a class='card' href='/seasons/{SEASON}/races/{r['round']}' style='display:"
+                  f"flex;flex-direction:column;gap:6px;align-items:flex-start;border-top:3px "
+                  f"solid {c}'><small style='color:#889'>R{r['round']} · {r['date'][5:]}</small>"
+                  f"<span>{e(r['name'].replace(' Grand Prix', ''))}</span>{inner}</a>")
+    d1 = D["drivers"][0]
+    body = (f"<h1>{SEASON} at a glance</h1><p style='color:#889'>{driver_name(d1)} champion "
+            f"with {d1['points']:g} points. Every race and its winner:</p><div style='display:"
+            f"grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px'>{tiles}"
+            "</div>")
+    return b_shell(SEASON, "home", body)
+
+
+def b_home_intro() -> str:
+    r = last_race()
+    body = ("<div class='card' style='padding:28px;margin-bottom:16px'><h1 style='margin:0 0 "
+            "8px'>Formula 1 history, served by a platform</h1><p style='color:#aab;max-width:"
+            "640px'>Every Formula 1 season since 1950, imported from Jolpica F1 and served by "
+            "the Formula Insights API. This site is regenerated daily by a GitHub Actions "
+            "publication using the release the platform runs; the platform itself is built with "
+            "Kubernetes, Argo CD, Terraform and Prometheus.</p><p><a href='/about' style='color:"
+            "#ff4d4d'>How it works →</a> &nbsp; <a href='https://github.com/fabriciolelis/"
+            "platform-docs' style='color:#ff4d4d'>Decisions and SLOs →</a></p></div>"
+            f"<div class='cols'><div class='card'><div class='k'>Latest race · {e(r['name'])}"
+            f"</div>{podium(D['results'][r['round']], 90)}</div>{top5_table()}</div>")
+    return b_shell(SEASON, "home", body)
 
 
 # --- Variant C: editorial timeline ---------------------------------------------------------
@@ -353,7 +469,9 @@ def c_standings(year: int) -> str:
 
 # --- routing and the prototype switcher ----------------------------------------------------
 
-VARIANTS = {"A": "Reference archive", "B": "App shell with sidebar", "C": "Editorial timeline"}
+VARIANTS = {"B1": "B, home: latest race", "B2": "B, home: season grid",
+            "B3": "B, home: portfolio intro"}
+HOMES = {"B1": b_home_latest, "B2": b_home_grid, "B3": b_home_intro}
 
 SWITCHER = """
 <div id="proto" style="position:fixed;bottom:16px;left:50%;transform:translateX(-50%);
@@ -376,6 +494,7 @@ u.searchParams.set('variant',cur);a.href=u});
 
 
 def render(path: str, v: str) -> tuple[int, str]:
+    full, v = v, v[0]
     parts = [p for p in path.split("/") if p]
     if parts == ["about"]:
         body = about_body()
@@ -383,7 +502,7 @@ def render(path: str, v: str) -> tuple[int, str]:
                 "B": lambda: b_shell(SEASON, "", f"<h1>About this site</h1>{body}"),
                 "C": lambda: c_page(f"<h1>About this site</h1>{body}")}[v]()
     elif not parts:
-        page = {"A": a_index, "B": lambda: b_season(SEASON), "C": lambda: c_season(SEASON)}[v]()
+        page = HOMES[full]()
     elif parts[0] == "seasons" and len(parts) == 2:
         page = {"A": a_season, "B": b_season, "C": c_season}[v](int(parts[1]))
     elif parts[0] == "seasons" and len(parts) == 3 and parts[2] == "standings":
@@ -392,7 +511,8 @@ def render(path: str, v: str) -> tuple[int, str]:
         page = {"A": a_race, "B": b_race, "C": c_race}[v](int(parts[1]), int(parts[3]))
     else:
         return 404, "not found"
-    label = f"{v} ({VARIANTS[v]})"
+    label = f"{full} ({VARIANTS[full]})"
+    v = full
     switcher = (SWITCHER.replace("PROTOTYPE · %s", f"PROTOTYPE · {label}")
                 .replace("keys=%s", f"keys={list(VARIANTS)}").replace('cur="%s"', f'cur="{v}"')
                 .replace("%%", "%"))
@@ -404,8 +524,8 @@ def render(path: str, v: str) -> tuple[int, str]:
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         url = urlparse(self.path)
-        v = parse_qs(url.query).get("variant", ["A"])[0].upper()
-        v = v if v in VARIANTS else "A"
+        v = parse_qs(url.query).get("variant", ["B1"])[0].upper()
+        v = v if v in VARIANTS else "B1"
         try:
             status, body = render(url.path, v)
         except (KeyError, StopIteration, ValueError, IndexError):
@@ -420,5 +540,5 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     D.update(load())
-    print(f"PROTOTYPE public site: http://localhost:{PORT}/?variant=A  (B, C; arrow keys)")
+    print(f"PROTOTYPE public site: http://localhost:{PORT}/?variant=B1  (B2, B3; arrow keys)")
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
